@@ -1,0 +1,45 @@
+﻿name: Build AngelGuardian (澶╀娇瀹堟姢 v4.1.0)
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build-rootless-deb:
+    name: Build AngelGuardian Rootless DEB
+    runs-on: macos-latest
+
+    steps:
+      - name: 1. 妫€鍑轰粨搴撴簮鐮?        uses: actions/checkout@v4
+
+      - name: 2. 瀹夎鎵撳寘渚濊禆涓庣鍚嶅伐鍏?(ldid / dpkg / xz)
+        run: |
+          brew install ldid dpkg xz gnu-tar
+
+      - name: 3. 閮ㄧ讲 Theos 寮€鍙戠幆澧?(浣跨敤 Xcode 鍘熺敓 iOS SDK)
+        run: |
+          export THEOS=~/theos
+          git clone --recursive https://github.com/theos/theos.git $THEOS
+          echo "Xcode SDK 璺緞:"
+          xcrun --sdk iphoneos --show-sdk-path
+
+      - name: 4. 璁剧疆鑴氭湰鎵ц鏉冮檺
+        run: |
+          if [ -f "layout/DEBIAN/postinst" ]; then
+            chmod 0755 layout/DEBIAN/postinst
+          fi
+
+      - name: 5. 缂栬瘧 arm64 + arm64e (PAC) Rootless 鎻掍欢鍖?        run: |
+          export THEOS=~/theos
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$THEOS/bin:$PATH"
+          make clean
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless messages=yes
+
+      - name: 6. 涓婁紶澶╀娇瀹堟姢 DEB 瀹夎鍖?        uses: actions/upload-artifact@v4
+        with:
+          name: AngelGuardian-v4.1.0-Deb
+          path: packages/*.deb
+          if-no-files-found: error
