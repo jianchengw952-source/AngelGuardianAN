@@ -231,7 +231,17 @@ static NSArray<NSDictionary *> *agCachedModelsForTab(AGConfigTab tab) {
     NSDictionary *p = loadGeminiPrefs();
     NSString *key = [NSString stringWithFormat:@"%@_CachedModels", agPrefixForTab(tab)];
     NSArray *arr = p[key];
-    if ([arr isKindOfClass:[NSArray class]] && arr.count > 0) return arr;
+    if ([arr isKindOfClass:[NSArray class]] && arr.count > 0) {
+        NSMutableArray<NSDictionary *> *cleanArr = [NSMutableArray array];
+        for (id item in arr) {
+            if ([item isKindOfClass:[NSDictionary class]] && item[@"id"]) {
+                [cleanArr addObject:item];
+            } else if ([item isKindOfClass:[NSString class]] && [(NSString *)item length] > 0) {
+                [cleanArr addObject:@{@"id": (NSString *)item, @"title": (NSString *)item}];
+            }
+        }
+        if (cleanArr.count > 0) return cleanArr;
+    }
     if (tab == AGConfigTabNativeLive) {
         return @[
             @{@"id": @"models/gemini-2.0-flash-exp",          @"title": @"🎙️ gemini-2.0-flash-exp (Google 官方Bidi实时语音流)"},
@@ -2595,12 +2605,23 @@ static void agDarwinPrefsChangedCallback(CFNotificationCenterRef center, void *o
     closeItem.tintColor = [UIColor colorWithRed:0.40 green:0.85 blue:0.65 alpha:1.0];
     self.navigationItem.rightBarButtonItem = closeItem;
 
-    UIScrollView *scroll = [[UIScrollView alloc] initWithFrame:self.view.bounds];
+    CGFloat w = self.view.bounds.size.width;
+    if (w <= 10.0) {
+        w = [UIScreen mainScreen].bounds.size.width;
+    }
+    if (w <= 10.0) w = 390.0;
+
+    CGFloat h = self.view.bounds.size.height;
+    if (h <= 10.0) {
+        h = [UIScreen mainScreen].bounds.size.height;
+    }
+    if (h <= 10.0) h = 844.0;
+
+    UIScrollView *scroll = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 0, w, h)];
     scroll.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     scroll.keyboardDismissMode = UIScrollViewKeyboardDismissModeOnDrag;
     [self.view addSubview:scroll];
 
-    CGFloat w = self.view.bounds.size.width;
     CGFloat pad = 16.0;
     CGFloat cardW = w - pad * 2;
     CGFloat y = 14.0;
@@ -2779,7 +2800,9 @@ static void agDarwinPrefsChangedCallback(CFNotificationCenterRef center, void *o
     NSString *ep = [self.endpointField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     NSString *key = [self.apiKeyField.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     BOOL canFetch = (ep.length >= 5 && key.length >= 5);
-    CGFloat cardW = self.endpointField.superview.bounds.size.width;
+    CGFloat cardW = self.endpointField.superview ? self.endpointField.superview.bounds.size.width : ([UIScreen mainScreen].bounds.size.width - 32.0);
+    if (cardW <= 10.0) cardW = [UIScreen mainScreen].bounds.size.width - 32.0;
+    if (cardW <= 10.0) cardW = 358.0;
     CGFloat cy = self.modelField.frame.origin.y;
 
     [UIView animateWithDuration:0.18 animations:^{
@@ -2871,9 +2894,18 @@ static void agDarwinPrefsChangedCallback(CFNotificationCenterRef center, void *o
         cell.backgroundColor = [UIColor clearColor];
         cell.textLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
     }
-    NSDictionary *m = self.currentTabModels[indexPath.row];
-    NSString *mID = m[@"id"];
-    NSString *mTitle = m[@"title"] ?: mID;
+    if (indexPath.row >= (NSInteger)self.currentTabModels.count) return cell;
+    id mObj = self.currentTabModels[indexPath.row];
+    NSString *mID = nil;
+    NSString *mTitle = nil;
+    if ([mObj isKindOfClass:[NSDictionary class]]) {
+        mID = mObj[@"id"];
+        mTitle = mObj[@"title"] ?: mID;
+    } else if ([mObj isKindOfClass:[NSString class]]) {
+        mID = (NSString *)mObj;
+        mTitle = mID;
+    }
+    if (!mID) return cell;
     BOOL isSelected = [mID isEqualToString:self.modelField.text];
     cell.textLabel.text = isSelected ? [NSString stringWithFormat:@"✅ %@", mTitle] : [NSString stringWithFormat:@"    %@", mTitle];
     cell.textLabel.textColor = isSelected ? [UIColor colorWithRed:0.45 green:0.95 blue:0.65 alpha:1.0] : [UIColor whiteColor];
@@ -2882,9 +2914,15 @@ static void agDarwinPrefsChangedCallback(CFNotificationCenterRef center, void *o
 
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
-    NSDictionary *m = self.currentTabModels[indexPath.row];
-    NSString *mID = m[@"id"];
-    if (mID) {
+    if (indexPath.row >= (NSInteger)self.currentTabModels.count) return;
+    id mObj = self.currentTabModels[indexPath.row];
+    NSString *mID = nil;
+    if ([mObj isKindOfClass:[NSDictionary class]]) {
+        mID = mObj[@"id"];
+    } else if ([mObj isKindOfClass:[NSString class]]) {
+        mID = (NSString *)mObj;
+    }
+    if (mID && mID.length > 0) {
         self.modelField.text = mID;
         [self saveCurrentTabFieldsToDisk];
         [self.modelsTableView reloadData];
@@ -2906,50 +2944,66 @@ static void agDarwinPrefsChangedCallback(CFNotificationCenterRef center, void *o
 
 @end
 
-// ==================== 4. 手机《设置》App 注入入口与桌面拦截钩子 ====================
+// ==================== 4. 手机《设置》App 独立安全入口 ====================
+%group PreferencesHooks
+
 %hook UINavigationController
 - (void)viewDidAppear:(BOOL)animated {
     %orig(animated);
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if ([bundleID isEqualToString:@"com.apple.Preferences"]) {
+    dispatch_async(dispatch_get_main_queue(), ^{
         UIViewController *topVC = self.topViewController;
-        if (topVC && ![topVC isKindOfClass:[AngelGuardianSettingsViewController class]] && topVC.navigationItem && !topVC.navigationItem.rightBarButtonItem) {
-            UIBarButtonItem *btn = [[UIBarButtonItem alloc] initWithTitle:@"✨守护天使AN" style:UIBarButtonItemStyleDone target:self action:@selector(angelGuardianOpenPrefsModal)];
-            btn.tintColor = [UIColor colorWithRed:0.55 green:0.36 blue:0.96 alpha:1.0];
-            topVC.navigationItem.rightBarButtonItem = btn;
+        if (topVC && self.viewControllers.firstObject == topVC && ![topVC isKindOfClass:[AngelGuardianSettingsViewController class]]) {
+            if (!topVC.navigationItem.rightBarButtonItem) {
+                UIBarButtonItem *btn = [[UIBarButtonItem alloc] initWithTitle:@"✨守护天使AN" 
+                                                                        style:UIBarButtonItemStyleDone 
+                                                                       target:self 
+                                                                       action:@selector(angelGuardianOpenPrefsModal)];
+                btn.tintColor = [UIColor colorWithRed:0.55 green:0.36 blue:0.96 alpha:1.0];
+                topVC.navigationItem.rightBarButtonItem = btn;
+            }
         }
-    }
+    });
 }
 
 %new
 - (void)angelGuardianOpenPrefsModal {
     @try {
-        if (self.presentedViewController) {
-            [self.presentedViewController dismissViewControllerAnimated:NO completion:nil];
+        UIViewController *presenter = self;
+        while (presenter.presentedViewController) {
+            if ([presenter.presentedViewController isKindOfClass:[UINavigationController class]] &&
+                [[(UINavigationController *)presenter.presentedViewController topViewController] isKindOfClass:[AngelGuardianSettingsViewController class]]) {
+                return; // 已经打开，避免重复模态弹出
+            }
+            presenter = presenter.presentedViewController;
         }
+
         AngelGuardianSettingsViewController *vc = [[AngelGuardianSettingsViewController alloc] init];
         UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-        nav.navigationBar.barStyle = UIBarStyleBlack;
-        nav.navigationBar.tintColor = [UIColor whiteColor];
         nav.modalPresentationStyle = UIModalPresentationPageSheet;
-        [self presentViewController:nav animated:YES completion:nil];
+
+        if (@available(iOS 13.0, *)) {
+            UINavigationBarAppearance *appearance = [[UINavigationBarAppearance alloc] init];
+            [appearance configureWithOpaqueBackground];
+            appearance.backgroundColor = [UIColor colorWithRed:0.10 green:0.10 blue:0.16 alpha:1.0];
+            appearance.titleTextAttributes = @{NSForegroundColorAttributeName: [UIColor whiteColor]};
+            nav.navigationBar.standardAppearance = appearance;
+            nav.navigationBar.scrollEdgeAppearance = appearance;
+        } else {
+            nav.navigationBar.barStyle = UIBarStyleBlack;
+        }
+        nav.navigationBar.tintColor = [UIColor whiteColor];
+
+        [presenter presentViewController:nav animated:YES completion:nil];
     } @catch (NSException *e) {}
 }
 %end
 
-%hook NSBundle
-- (NSDictionary *)infoDictionary {
-    NSDictionary *orig = %orig;
-    if (self == [NSBundle mainBundle] && orig) {
-        NSMutableDictionary *mutableInfo = [orig mutableCopy];
-        mutableInfo[@"NSMicrophoneUsageDescription"] = @"天使守护需要使用麦克风进行官方 WebSocket Live 实时语音对讲";
-        mutableInfo[@"NSCameraUsageDescription"] = @"天使守护需要使用相机进行独立实景视频 AI 对话";
-        mutableInfo[@"NSContactsUsageDescription"] = @"天使守护需要访问通讯录为您拨打电话与发送短信";
-        return mutableInfo;
-    }
-    return orig;
-}
-%end
+%end // PreferencesHooks
+
+
+
+// ==================== 5. SpringBoard 原生硬件按键与系统Siri拦截 ====================
+%group SpringBoardHooks
 
 %hook SBLockHardwareButtonActions
 - (void)performLongPressActions {
@@ -3036,3 +3090,16 @@ static void agDarwinPrefsChangedCallback(CFNotificationCenterRef center, void *o
     %orig(animated);
 }
 %end
+
+%end // SpringBoardHooks
+
+%ctor {
+    @autoreleasepool {
+        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        if ([bundleID isEqualToString:@"com.apple.springboard"]) {
+            %init(SpringBoardHooks);
+        } else if ([bundleID isEqualToString:@"com.apple.Preferences"]) {
+            %init(PreferencesHooks);
+        }
+    }
+}
