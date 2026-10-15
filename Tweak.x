@@ -9,6 +9,7 @@
 // ==============================================================================
 
 #import <objc/runtime.h>
+#import <objc/message.h>
 #import <dlfcn.h>
 #import <spawn.h>
 #import <UIKit/UIKit.h>
@@ -34,12 +35,15 @@ static NSMutableDictionary *gCachedPrefs = nil;
 
 static void safelyDismissNativeSiriIfVisible(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        SBAssistantController *ac = [%c(SBAssistantController) sharedInstance];
-        if (ac) {
-            if ([ac respondsToSelector:@selector(dismissAssistantViewIfNecessaryWithAnimation:)]) {
-                [ac dismissAssistantViewIfNecessaryWithAnimation:0];
-            } else if ([ac respondsToSelector:@selector(dismissAssistantViewIfNecessary)]) {
-                [ac dismissAssistantViewIfNecessary];
+        Class acClass = objc_getClass("SBAssistantController");
+        if (acClass && [acClass respondsToSelector:sel_registerName("sharedInstance")]) {
+            id ac = ((id(*)(id, SEL))objc_msgSend)(acClass, sel_registerName("sharedInstance"));
+            if (ac) {
+                if ([ac respondsToSelector:sel_registerName("dismissAssistantViewIfNecessaryWithAnimation:")]) {
+                    ((void(*)(id, SEL, NSInteger))objc_msgSend)(ac, sel_registerName("dismissAssistantViewIfNecessaryWithAnimation:"), 0);
+                } else if ([ac respondsToSelector:sel_registerName("dismissAssistantViewIfNecessary")]) {
+                    ((void(*)(id, SEL))objc_msgSend)(ac, sel_registerName("dismissAssistantViewIfNecessary"));
+                }
             }
         }
     });
