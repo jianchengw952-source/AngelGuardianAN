@@ -1,4 +1,4 @@
-﻿#!/bin/sh
+#!/bin/sh
 rm -f /var/jb/Library/PreferenceLoader/Preferences/AISiriSettings.plist 2>/dev/null || true
 rm -rf /var/jb/Library/PreferenceBundles/AISiriSettings.bundle 2>/dev/null || true
 exit 0
