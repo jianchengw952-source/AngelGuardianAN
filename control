@@ -1,8 +1,8 @@
-﻿Package: com.custom.geminisirioverlay
-Name: 澶╀娇瀹堟姢
+Package: com.custom.geminisirioverlay
+Name: 天使守护
 Version: 4.1.0
 Architecture: iphoneos-arm64
-Description: 澶╀娇瀹堟姢 (Angel Guardian v4.1.0 - 鍙屾牳Live瀵硅 + 鐙珛瑙嗛AI + 闆舵棆杞函鍑€鏌斿厜鐗? for iOS 15.0-17.x Dopamine Rootless.
+Description: 天使守护 (Angel Guardian v4.1.0 - 双核Live对讲 + 独立视频AI + 零旋转纯净柔光版) for iOS 15.0-17.x Dopamine Rootless.
 Maintainer: CustomDev
 Author: CustomDev
 Section: Tweaks
