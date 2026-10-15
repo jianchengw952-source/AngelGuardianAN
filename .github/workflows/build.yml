@@ -1,4 +1,4 @@
-name: Build AngelGuardian v4.2 (3-Mode Independent Switches + Video Fix + Live Greeting)
+name: Build AngelGuardian v5.0 (True WebSocket Bidi Live Audio & Video Stream)
 
 on: [push, workflow_dispatch]
 
@@ -33,9 +33,9 @@ jobs:
           cat << 'EOF' > control
           Package: com.custom.geminisirioverlay
           Name: 天使守护
-          Version: 4.2.0
+          Version: 5.0.0
           Architecture: iphoneos-arm64
-          Description: 天使守护 v4.2 (纯正Live + 独立视频AI防黑屏 + 纯文本模式 三大独立开关与配置 + 唤醒主动语音自报官方身份 + 适配至iPhone 18 Pro Max)
+          Description: 天使守护 v5.0 (真·官方WebSocket双向实时PCM原声对讲 + 1FPS实时摄像头视频流 + 纯文本模式 + 三模独立开关与独立配置)
           Maintainer: Custom
           Author: Custom
           Section: Tweaks
@@ -66,13 +66,14 @@ jobs:
 
           cat << 'EOF' > Tweak.x
           // ==============================================================================
-          // 软件名称: 天使守护 (Angel Guardian v4.2.0 终极三模旗舰版)
+          // 软件名称: 天使守护 (Angel Guardian v5.0.0 - 真·官方 WebSocket 实时音视频流旗舰版)
           // 核心架构:
-          // 1. 三大模式 (🎙️纯正Live / 📹独立视频AI / 💬纯文本模式) 各自拥有独立启用开关 + 独立API/Key/代理/模型配置
-          // 2. 🎙️纯正Live模式: 唤醒自动开口语音自报官方真实身份(如“我是Gemini/ChatGPT”)，念完自动开启高敏麦克风双向连续交流
-          // 3. 📹独立视频AI模式: 彻底解决SpringBoard相机黑屏(关闭AudioSession抢占 + UIImageView硬件帧实时直绘)，边看实时画面边语音对话
-          // 4. 💬纯文本模式: 底部专属💬按钮一键切入安静打字流式问答，支持多轮上下文记忆与多问题窗口自动长高
-          // 5. 全面适配 Dopamine iOS 15.0 - 17.x+ 及最新 iPhone 18 Pro Max 全系列机型
+          // 1. 🎙️纯正Live模式: 真正的 WebSocket BidiGenerateContent / Realtime 双向全双工连接！
+          //    - 上行: AVAudioEngine 实时采集麦克风 -> 16kHz 16-bit PCM 流式推送
+          //    - 下行: 实时接收官方 24kHz PCM 原始真人语音流 -> AVAudioPlayerNode 零延迟播放 + 唤醒自动开口自报身份
+          // 2. 📹独立视频AI模式: UIImageView 硬件帧实时直绘(彻底解决SpringBoard黑屏) + 1 FPS 连续将实时摄像头画面推入 WebSocket 实时流，边看动态画面边双向语音对话！
+          // 3. 💬纯文本模式: 底部专属💬按钮一键切入安静打字 SSE 流式对话，支持多轮上下文记忆与窗口自动变大
+          // 4. 三大模式在系统《设置》中均拥有独立启用开关 + 独立接口/Key/代理/模型配置
           // ==============================================================================
 
           #import <objc/runtime.h>
@@ -90,17 +91,15 @@ jobs:
 
           extern char **environ;
 
-          // ==================== 三大独立模式枚举 ====================
           typedef NS_ENUM(NSInteger, AGConfigTab) {
-              AGConfigTabNativeLive = 0, // 🎙️ 纯正 Live 实时语音交流
-              AGConfigTabVideoAI    = 1, // 📹 独立视频 AI 实时视觉语音交流
-              AGConfigTabPureText   = 2  // 💬 纯文本流式打字交流
+              AGConfigTabNativeLive = 0, // 🎙️ 纯正 Live 实时双向语音流
+              AGConfigTabVideoAI    = 1, // 📹 独立视频 AI 实时摄像头+语音流
+              AGConfigTabPureText   = 2  // 💬 纯文本打字流式交流
           };
 
           static NSString * const kAGPrefsChangedNotification = @"com.custom.geminisirioverlay.prefsChanged";
           static NSMutableDictionary *gCachedPrefs = nil;
 
-          // 强杀原生 Siri 录音守护进程 assistantd，确保“嘿 Siri”唤醒后 100% 释放麦克风
           static void killNativeSiriAudioDaemon(void) {
               dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
                   pid_t pid;
@@ -115,7 +114,6 @@ jobs:
               });
           }
 
-          // 暂停后台正在播放的视频/音乐，防止手机自身外放声音干扰麦克风
           typedef Boolean (*MRMediaRemoteSendCommandFunc)(uint32_t command, void *userInfo);
           static void pauseBackgroundMediaPlayback(void) {
               static MRMediaRemoteSendCommandFunc sendCmd = NULL;
@@ -231,7 +229,7 @@ jobs:
               return 16.0;
           }
 
-          // ==================== 三大独立模块的开关与四项配置读写辅助 ====================
+          // ==================== 三大独立模块的开关与配置读写 ====================
           static NSString *agPrefixForTab(AGConfigTab tab) {
               switch (tab) {
                   case AGConfigTabNativeLive: return @"AG_Live";
@@ -245,11 +243,7 @@ jobs:
               NSDictionary *p = loadGeminiPrefs();
               NSString *key = [NSString stringWithFormat:@"%@_Enabled", agPrefixForTab(tab)];
               NSNumber *val = p[key];
-              if (!val) {
-                  // 默认全部开启，用户可在设置里独立关闭任意一个
-                  return YES;
-              }
-              return [val boolValue];
+              return val ? [val boolValue] : YES;
           }
 
           static NSString *agEndpointForTab(AGConfigTab tab) {
@@ -272,7 +266,7 @@ jobs:
               NSString *key = [NSString stringWithFormat:@"%@_APIKey", agPrefixForTab(tab)];
               NSString *val = p[key];
               if (!val || val.length == 0) {
-                  val = p[@"AG_Text_APIKey"] ?: (p[@"AG_Live_APIKey"] ?: (p[@"Gemini_APIKey"] ?: @""));
+                  val = p[@"AG_Live_APIKey"] ?: (p[@"AG_Text_APIKey"] ?: (p[@"Gemini_APIKey"] ?: @""));
               }
               return val ?: @"";
           }
@@ -282,7 +276,7 @@ jobs:
               NSString *key = [NSString stringWithFormat:@"%@_ProxyPort", agPrefixForTab(tab)];
               NSString *val = p[key];
               if (!val || val.length == 0) {
-                  val = p[@"AG_Text_ProxyPort"] ?: (p[@"AG_Live_ProxyPort"] ?: (p[@"Gemini_ProxyPort"] ?: @""));
+                  val = p[@"AG_Live_ProxyPort"] ?: (p[@"AG_Text_ProxyPort"] ?: (p[@"Gemini_ProxyPort"] ?: @""));
               }
               return val ?: @"";
           }
@@ -291,9 +285,7 @@ jobs:
               NSDictionary *p = loadGeminiPrefs();
               NSString *key = [NSString stringWithFormat:@"%@_Model", agPrefixForTab(tab)];
               NSString *val = p[key];
-              if (!val || val.length == 0 || [val containsString:@"2.0-flash-exp"]) {
-                  if (tab == AGConfigTabNativeLive) return @"models/gemini-2.5-flash";
-                  if (tab == AGConfigTabVideoAI)    return @"models/gemini-2.5-flash";
+              if (!val || val.length == 0) {
                   return @"models/gemini-2.5-flash";
               }
               return val;
@@ -306,19 +298,17 @@ jobs:
               if ([arr isKindOfClass:[NSArray class]] && arr.count > 0) return arr;
               if (tab == AGConfigTabNativeLive) {
                   return @[
-                      @{@"id": @"models/gemini-2.5-flash", @"title": @"🎙️ gemini-2.5-flash (Google 官方实时语音主力)"},
-                      @{@"id": @"models/gemini-2.5-pro", @"title": @"🧠 gemini-2.5-pro (Google 深度多模态旗舰)"},
-                      @{@"id": @"gpt-4o-audio-preview", @"title": @"⚡ gpt-4o-audio-preview (ChatGPT 原生语音)"},
-                      @{@"id": @"qwen-omni-turbo", @"title": @"🔥 qwen-omni-turbo (阿里通义千问全模态语音)"},
-                      @{@"id": @"glm-4-voice", @"title": @"✨ glm-4-voice (智谱清言原生语音对讲)"}
+                      @{@"id": @"models/gemini-2.5-flash", @"title": @"🎙️ gemini-2.5-flash (Google 官方 WebSocket Live)"},
+                      @{@"id": @"models/gemini-2.0-flash-live-001", @"title": @"🎙️ gemini-2.0-flash-live-001 (Google 专用Bidi流)"},
+                      @{@"id": @"gpt-4o-realtime-preview", @"title": @"⚡ gpt-4o-realtime-preview (OpenAI 官方Realtime)"},
+                      @{@"id": @"qwen-omni-turbo-realtime", @"title": @"🔥 qwen-omni-turbo-realtime (阿里千问实时语音)"}
                   ];
               } else if (tab == AGConfigTabVideoAI) {
                   return @[
-                      @{@"id": @"models/gemini-2.5-flash", @"title": @"📹 gemini-2.5-flash (Google 极速实时视频视觉)"},
-                      @{@"id": @"models/gemini-2.5-pro", @"title": @"📹 gemini-2.5-pro (Google 超清视觉推理旗舰)"},
-                      @{@"id": @"gpt-4o", @"title": @"👁️ gpt-4o (OpenAI ChatGPT 实时视觉旗舰)"},
-                      @{@"id": @"qwen-vl-max", @"title": @"🔥 qwen-vl-max (阿里通义千问视觉旗舰)"},
-                      @{@"id": @"glm-4v-plus", @"title": @"✨ glm-4v-plus (智谱清言高清视频视觉)"}
+                      @{@"id": @"models/gemini-2.5-flash", @"title": @"📹 gemini-2.5-flash (Google 实时视频流Bidi)"},
+                      @{@"id": @"models/gemini-2.0-flash-live-001", @"title": @"📹 gemini-2.0-flash-live-001 (Google 实时视觉流)"},
+                      @{@"id": @"gpt-4o-realtime-preview", @"title": @"👁️ gpt-4o-realtime-preview (OpenAI 实时多模态)"},
+                      @{@"id": @"qwen-omni-turbo-realtime", @"title": @"🔥 qwen-omni-turbo-realtime (通义千问实时视频)"}
                   ];
               }
               return @[
@@ -326,7 +316,6 @@ jobs:
                   @{@"id": @"deepseek-chat", @"title": @"🐋 deepseek-chat (DeepSeek V3/V4 极速流式)"},
                   @{@"id": @"deepseek-reasoner", @"title": @"🐋 deepseek-reasoner (DeepSeek R1 深度推理)"},
                   @{@"id": @"qwen-max", @"title": @"☁️ qwen-max (阿里通义千问旗舰)"},
-                  @{@"id": @"doubao-1-5-pro-32k-250115", @"title": @"🫘 doubao-1.5-pro (字节跳动豆包旗舰)"},
                   @{@"id": @"gpt-4o", @"title": @"🤖 gpt-4o (OpenAI ChatGPT 旗舰)"},
                   @{@"id": @"claude-3-7-sonnet-latest", @"title": @"🎭 claude-3-7-sonnet (Anthropic Claude 旗舰)"}
               ];
@@ -334,7 +323,7 @@ jobs:
 
           static BOOL agIsGoogleNativeProtocol(NSString *endpoint, NSString *model) {
               NSString *lowerEP = [endpoint lowercaseString];
-              if ([lowerEP containsString:@"googleapis.com"] || [lowerEP containsString:@"v1beta"]) {
+              if ([lowerEP containsString:@"googleapis.com"] || [lowerEP containsString:@"v1beta"] || [lowerEP containsString:@"v1alpha"]) {
                   if (![lowerEP containsString:@"/v1/chat/completions"] && ![lowerEP containsString:@"openai"]) {
                       return YES;
                   }
@@ -345,7 +334,7 @@ jobs:
           static NSURLSession *agCreateSessionWithProxy(NSString *proxyStr, id<NSURLSessionDelegate> delegate, NSOperationQueue *queue) {
               NSString *cleanProxy = [proxyStr stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
               NSURLSessionConfiguration *config = [NSURLSessionConfiguration defaultSessionConfiguration];
-              config.timeoutIntervalForRequest = 22.0;
+              config.timeoutIntervalForRequest = 30.0;
               if (cleanProxy.length > 0) {
                   NSString *host = @"127.0.0.1";
                   NSNumber *portNum = nil;
@@ -446,17 +435,17 @@ jobs:
                       [allBackup addObject:entry];
 
                       if (tab == AGConfigTabNativeLive) {
-                          if ([lower containsString:@"flash"] || [lower containsString:@"pro"] ||
-                              [lower containsString:@"live"] || [lower containsString:@"realtime"] ||
-                              [lower containsString:@"audio"] || [lower containsString:@"omni"] ||
-                              [lower containsString:@"voice"] || [lower containsString:@"gpt-4o"]) {
+                          NSArray *bidiMethods = m[@"supportedGenerationMethods"];
+                          BOOL supportsBidi = ([bidiMethods isKindOfClass:[NSArray class]] && [bidiMethods containsObject:@"bidiGenerateContent"]);
+                          if (supportsBidi || [lower containsString:@"live"] || [lower containsString:@"realtime"] ||
+                              [lower containsString:@"2.5-flash"] || [lower containsString:@"2.0-flash"] ||
+                              [lower containsString:@"omni"] || [lower containsString:@"voice"]) {
                               [filtered addObject:entry];
                           }
                       } else if (tab == AGConfigTabVideoAI) {
                           if ([lower containsString:@"gemini"] || [lower containsString:@"vl"] ||
                               [lower containsString:@"vision"] || [lower containsString:@"4o"] ||
-                              [lower containsString:@"claude-3"] || [lower containsString:@"omni"] ||
-                              [lower containsString:@"glm-4v"] || [lower containsString:@"doubao"]) {
+                              [lower containsString:@"omni"] || [lower containsString:@"glm-4v"]) {
                               [filtered addObject:entry];
                           }
                       } else {
@@ -495,8 +484,8 @@ jobs:
           - (BOOL)_canBecomeKeyWindow { return YES; }
           @end
 
-          // ==================== 2. 核心控制器 (天使守护 v4.2 三模旗舰) ====================
-          @interface GeminiAssistantManager : NSObject <AVSpeechSynthesizerDelegate, AVAudioRecorderDelegate, AVCaptureVideoDataOutputSampleBufferDelegate, UITextFieldDelegate, UITableViewDelegate, UITableViewDataSource, NSURLSessionDataDelegate>
+          // ==================== 2. 核心控制器 (天使守护 v5.0 真·WebSocket 实时流引擎) ====================
+          @interface GeminiAssistantManager : NSObject <AVSpeechSynthesizerDelegate, AVCaptureVideoDataOutputSampleBufferDelegate, UITextFieldDelegate, UITableViewDelegate, UITableViewDataSource, NSURLSessionDataDelegate, NSURLSessionWebSocketDelegate>
           @property (nonatomic, strong) GeminiPassthroughWindow *overlayWindow;
           @property (nonatomic, weak) UIWindow *previousKeyWindow;
 
@@ -518,16 +507,16 @@ jobs:
           @property (nonatomic, strong) UITextView *responseTextView;
           @property (nonatomic, strong) UILabel *actionBannerLabel;
 
-          // 底部三大模式切换按钮 + 输入框 + 发送按钮
-          @property (nonatomic, strong) UIButton *liveModeButton;   // 🎙️ 纯正 Live 模式按钮
-          @property (nonatomic, strong) UIButton *videoModeButton;  // 📹 独立视频 AI 模式按钮
-          @property (nonatomic, strong) UIButton *textModeButton;   // 💬 纯文本模式按钮
+          // 底部三大模式切换按钮
+          @property (nonatomic, strong) UIButton *liveModeButton;   // 🎙️ 纯正 Live 模式
+          @property (nonatomic, strong) UIButton *videoModeButton;  // 📹 独立视频 AI 模式
+          @property (nonatomic, strong) UIButton *textModeButton;   // 💬 纯文本模式
           @property (nonatomic, strong) UITextField *inputField;
           @property (nonatomic, strong) UIButton *sendBtn;
 
           @property (nonatomic, assign) AGConfigTab activeModeTab;
 
-          // 实景摄像头画中画组件 (搭载 UIImageView 硬件帧实时直绘防黑屏引擎)
+          // 📹 实景摄像头画中画 + 1FPS 连续视频帧推流器
           @property (nonatomic, strong) UIView *cameraPreviewContainer;
           @property (nonatomic, strong) UIImageView *cameraLiveImageView;
           @property (nonatomic, strong) AVCaptureVideoPreviewLayer *cameraPreviewLayer;
@@ -536,37 +525,39 @@ jobs:
           @property (nonatomic, strong) CIContext *gpuImageContext;
           @property (nonatomic, strong) NSData *latestFrameJPEGData;
           @property (nonatomic, assign) NSTimeInterval lastFrameProcessTime;
+          @property (nonatomic, strong) NSTimer *videoStreamTimer;
           @property (nonatomic, assign) BOOL isVideoChatActive;
           @property (nonatomic, assign) BOOL useFrontCamera;
 
-          // 悬浮窗右上角 ⚙️ 纯净模型切换列表
+          // ⚙️ 纯净模型切换列表
           @property (nonatomic, strong) UIView *modelPickerContainer;
           @property (nonatomic, strong) UITableView *modelTableView;
           @property (nonatomic, strong) UILabel *pickerHeaderLabel;
           @property (nonatomic, strong) NSMutableArray<NSDictionary *> *availableModelsList;
 
-          // 录音与防截断控制 (移除冲突的 SFSpeechRecognizer，100% 稳定识音)
+          // 🎙️ 真·官方 WebSocket BidiStream 全双工 PCM 音频引擎
           @property (nonatomic, strong) UIImpactFeedbackGenerator *impactHaptic;
           @property (nonatomic, strong) UINotificationFeedbackGenerator *notifyHaptic;
-          @property (nonatomic, strong) AVAudioRecorder *audioRecorder;
-          @property (nonatomic, strong) NSTimer *meterTimer;
-          @property (nonatomic, assign) BOOL hasDetectedSpeech;
-          @property (nonatomic, assign) NSTimeInterval speechFirstDetectedTime;
-          @property (nonatomic, assign) NSTimeInterval silenceStartTime;
-          @property (nonatomic, assign) NSTimeInterval recordStartTime;
-          @property (nonatomic, assign) BOOL isFollowUpListening;
-          @property (nonatomic, assign) NSInteger micRetryAttemptCount;
-          @property (nonatomic, assign) BOOL hasVerifiedAudioFlow;
-          @property (nonatomic, copy) NSString *audioFilePath;
+          @property (nonatomic, strong) NSURLSession *webSocketSession;
+          @property (nonatomic, strong) NSURLSessionWebSocketTask *liveWebSocketTask;
+          @property (nonatomic, assign) BOOL isWebSocketConnected;
+          @property (nonatomic, assign) BOOL isGoogleBidiProtocol;
 
-          // 流式 SSE 网络 + 句子级流式语音播报 + 多轮上下文记忆 + 动态高度
+          @property (nonatomic, strong) AVAudioEngine *liveAudioEngine;
+          @property (nonatomic, strong) AVAudioPlayerNode *pcmPlayerNode;
+          @property (nonatomic, strong) AVAudioFormat *playerOutputFormat;
+          @property (nonatomic, strong) AVAudioConverter *micInputConverter;
+          @property (nonatomic, strong) NSMutableData *outgoingPCMBuffer;
+          @property (nonatomic, assign) NSInteger activePlayingBuffersCount;
+          @property (nonatomic, assign) NSTimeInterval lastUserAudioActivityTime;
+          @property (nonatomic, strong) NSTimer *idleWatchdogTimer;
+
+          // 💬 纯文本模式 SSE 流式引擎 + 多轮上下文记忆
           @property (nonatomic, strong) AVSpeechSynthesizer *synthesizer;
           @property (nonatomic, strong) NSURLSession *streamSession;
           @property (nonatomic, strong) NSURLSessionDataTask *currentTask;
           @property (nonatomic, strong) NSMutableString *sseLineBuffer;
           @property (nonatomic, strong) NSMutableString *accumulatedReplyText;
-          @property (nonatomic, strong) NSMutableString *pendingSpeechChunk;
-          @property (nonatomic, assign) NSInteger activeSpeechUtteranceCount;
           @property (nonatomic, strong) NSMutableArray<NSDictionary *> *chatHistory;
           @property (nonatomic, strong) NSMutableString *chatTranscriptText;
           @property (nonatomic, assign) NSInteger questionTurnCount;
@@ -617,11 +608,10 @@ jobs:
                   _chatTranscriptText = [NSMutableString string];
                   _sseLineBuffer = [NSMutableString string];
                   _accumulatedReplyText = [NSMutableString string];
-                  _pendingSpeechChunk = [NSMutableString string];
+                  _outgoingPCMBuffer = [NSMutableData data];
                   _currentCapsuleHeight = 330.0;
                   _useFrontCamera = NO;
                   _activeModeTab = AGConfigTabNativeLive;
-                  _audioFilePath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"angel_guardian_v42_voice.m4a"];
                   _availableModelsList = [NSMutableArray arrayWithArray:agCachedModelsForTab(_activeModeTab)];
 
                   CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
@@ -673,16 +663,10 @@ jobs:
               } @catch (NSException *e) {}
           }
 
-          #pragma mark - 三大模式状态读取与国内外全 AI 厂商名字识别
+          #pragma mark - 三大模式状态读取与国内外全 AI 品牌识别
 
           - (BOOL)isTweakEnabled {
               NSNumber *val = loadGeminiPrefs()[@"Gemini_Enabled"];
-              return val ? [val boolValue] : YES;
-          }
-
-          - (BOOL)isAutoSpeakEnabled {
-              if (self.activeModeTab == AGConfigTabPureText) return NO; // 纯文本模式默认安静不念语音
-              NSNumber *val = loadGeminiPrefs()[@"Gemini_AutoSpeak"];
               return val ? [val boolValue] : YES;
           }
 
@@ -723,7 +707,7 @@ jobs:
           - (void)updateHeaderBadges {
               self.titleMaskLabel.text = [self currentVendorBrandName];
               if (self.activeModeTab == AGConfigTabVideoAI) {
-                  self.modeBadgeLabel.text = @"📹 视频AI";
+                  self.modeBadgeLabel.text = @"📹 实时视频";
                   self.modeBadgeLabel.textColor = [UIColor colorWithRed:0.45 green:0.98 blue:0.75 alpha:1.0];
                   self.modeBadgeLabel.layer.borderColor = [UIColor colorWithRed:0.35 green:0.90 blue:0.65 alpha:0.65].CGColor;
               } else if (self.activeModeTab == AGConfigTabPureText) {
@@ -736,7 +720,6 @@ jobs:
                   self.modeBadgeLabel.layer.borderColor = [UIColor colorWithRed:0.95 green:0.45 blue:0.80 alpha:0.65].CGColor;
               }
 
-              // 高亮底部当前选中的模式按钮
               self.liveModeButton.backgroundColor = (self.activeModeTab == AGConfigTabNativeLive)
                   ? [UIColor colorWithRed:0.92 green:0.28 blue:0.60 alpha:0.92]
                   : [UIColor colorWithWhite:1.0 alpha:0.12];
@@ -808,7 +791,6 @@ jobs:
 
           - (void)keyboardWillShow:(NSNotification *)notification {
               if (!self.overlayWindow || self.overlayWindow.hidden) return;
-              [self stopAllVoiceCaptureAndCancel:YES];
               CGRect kbFrame = [notification.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
               CGFloat duration = [notification.userInfo[UIKeyboardAnimationDurationUserInfoKey] doubleValue];
               CGRect screenBounds = [UIScreen mainScreen].bounds;
@@ -1063,7 +1045,7 @@ jobs:
               self.subStatusLabel = [[UILabel alloc] initWithFrame:CGRectMake(14, 12, self.innerGlassBox.bounds.size.width - 28, 20)];
               self.subStatusLabel.textColor = [UIColor colorWithRed:0.58 green:0.78 blue:1.00 alpha:1.0];
               self.subStatusLabel.font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightSemibold];
-              self.subStatusLabel.text = @"🎙️ 正在连接官方 Live 语音通道...";
+              self.subStatusLabel.text = @"🎙️ 正在建立官方 WebSocket 实时流连接...";
               [self.innerGlassBox addSubview:self.subStatusLabel];
 
               self.responseTextView = [[UITextView alloc] initWithFrame:CGRectMake(10, 34, self.innerGlassBox.bounds.size.width - 20, 166)];
@@ -1072,10 +1054,9 @@ jobs:
               self.responseTextView.font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightBold];
               self.responseTextView.editable = NO;
               self.responseTextView.selectable = YES;
-              self.responseTextView.text = @"“直接开口说话，讲完停顿 1.6 秒自动发送...”";
+              self.responseTextView.text = @"“正在接通官方实时流通道...”";
               [self.innerGlassBox addSubview:self.responseTextView];
 
-              // 📹 实景摄像头预览容器 (搭载 UIImageView 硬件帧实时直绘层，100% 解决 SpringBoard 黑屏)
               CGFloat camW = 112.0;
               CGFloat camH = 154.0;
               self.cameraPreviewContainer = [[UIView alloc] initWithFrame:CGRectMake(self.innerGlassBox.bounds.size.width - camW - 10, 42, camW, camH)];
@@ -1113,7 +1094,6 @@ jobs:
               self.actionBannerLabel.alpha = 0.0;
               [content addSubview:self.actionBannerLabel];
 
-              // 底部三大模式切换按钮：🎙️ Live + 📹 视频AI + 💬 纯文本
               self.liveModeButton = [UIButton buttonWithType:UIButtonTypeSystem];
               self.liveModeButton.layer.cornerRadius = 18.0;
               self.liveModeButton.layer.borderWidth = 0.8;
@@ -1166,7 +1146,6 @@ jobs:
               [self refreshBottomBarLayoutForActiveModes];
           }
 
-          // 根据《设置》里 3 个标签的独立启用开关，动态排布底部 🎙️ / 📹 / 💬 按钮
           - (void)refreshBottomBarLayoutForActiveModes {
               if (!self.overlayWindow || !self.overlayWindow.capsuleWrapper) return;
               CGFloat capsuleWidth = self.overlayWindow.capsuleWrapper.bounds.size.width;
@@ -1177,7 +1156,6 @@ jobs:
               BOOL showVideo = agIsTabEnabled(AGConfigTabVideoAI);
               BOOL showText  = agIsTabEnabled(AGConfigTabPureText);
 
-              // 至少保底显示一个按钮
               if (!showLive && !showVideo && !showText) {
                   showLive = YES;
               }
@@ -1206,32 +1184,24 @@ jobs:
               if (self.activeModeTab == AGConfigTabPureText) {
                   self.inputField.attributedPlaceholder = [[NSAttributedString alloc] initWithString:@"  💬 纯文本模式：请直接打字提问..." attributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:0.68 alpha:1.0]}];
               } else if (self.activeModeTab == AGConfigTabVideoAI) {
-                  self.inputField.attributedPlaceholder = [[NSAttributedString alloc] initWithString:@"  📹 看着实时画面直接说话或打字..." attributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:0.68 alpha:1.0]}];
+                  self.inputField.attributedPlaceholder = [[NSAttributedString alloc] initWithString:@"  📹 实时视频流对讲中，也可打字..." attributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:0.68 alpha:1.0]}];
               } else {
-                  self.inputField.attributedPlaceholder = [[NSAttributedString alloc] initWithString:@"  🎙️ Live对讲中，也可点此打字..." attributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:0.68 alpha:1.0]}];
+                  self.inputField.attributedPlaceholder = [[NSAttributedString alloc] initWithString:@"  🎙️ 官方Live实时对讲中，也可打字..." attributes:@{NSForegroundColorAttributeName: [UIColor colorWithWhite:0.68 alpha:1.0]}];
               }
               [self updateHeaderBadges];
           }
 
-          #pragma mark - 底部三大模式按钮点击切换逻辑
+          #pragma mark - 底部三大模式切换逻辑
 
           - (void)liveModeButtonTapped {
               [self.impactHaptic impactOccurred];
               [self.inputField resignFirstResponder];
-              if (self.activeModeTab == AGConfigTabNativeLive) {
-                  if (self.audioRecorder && self.audioRecorder.isRecording) {
-                      [self finishVoiceTurnAndDispatch];
-                  } else {
-                      [self startVoiceRecordingWithFollowUp:NO];
-                  }
-                  return;
-              }
               if (self.isVideoChatActive) [self stopCameraSession];
               self.activeModeTab = AGConfigTabNativeLive;
               [self updateHeaderBadges];
               [self refreshBottomBarLayoutForActiveModes];
-              [self showActionBanner:@"🎙️ 已切换至：纯正 Live 实时语音模式"];
-              [self triggerOfficialGreetingAndStartListeningForTab:AGConfigTabNativeLive];
+              [self showActionBanner:@"🎙️ 已切换至：官方纯正 Live 实时语音流"];
+              [self startTrueRealtimeWebSocketSessionForTab:AGConfigTabNativeLive];
           }
 
           - (void)videoModeButtonTapped {
@@ -1242,14 +1212,13 @@ jobs:
                   return;
               }
               if (self.activeModeTab == AGConfigTabVideoAI && self.isVideoChatActive) {
-                  // 再次点击关闭摄像头切回 Live
                   [self stopCameraSession];
                   self.activeModeTab = agIsTabEnabled(AGConfigTabNativeLive) ? AGConfigTabNativeLive : AGConfigTabPureText;
                   [self updateHeaderBadges];
                   [self refreshBottomBarLayoutForActiveModes];
-                  [self showActionBanner:@"📷 已关闭视频画面"];
+                  [self showActionBanner:@"📷 已关闭实时摄像头"];
                   if (self.activeModeTab == AGConfigTabNativeLive) {
-                      [self startVoiceRecordingWithFollowUp:NO];
+                      [self startTrueRealtimeWebSocketSessionForTab:AGConfigTabNativeLive];
                   }
                   return;
               }
@@ -1257,14 +1226,14 @@ jobs:
               [self startCameraSession];
               [self updateHeaderBadges];
               [self refreshBottomBarLayoutForActiveModes];
-              [self showActionBanner:@"📹 已开启独立视频 AI (实时画面已激活)"];
-              [self triggerOfficialGreetingAndStartListeningForTab:AGConfigTabVideoAI];
+              [self showActionBanner:@"📹 已开启独立视频 AI (1FPS 实时画面推流中)"];
+              [self startTrueRealtimeWebSocketSessionForTab:AGConfigTabVideoAI];
           }
 
           - (void)textModeButtonTapped {
               [self.impactHaptic impactOccurred];
               if (self.isVideoChatActive) [self stopCameraSession];
-              [self stopAllVoiceCaptureAndCancel:YES];
+              [self stopTrueRealtimeWebSocketAndAudioEngine];
               if ([self.synthesizer isSpeaking]) {
                   [self.synthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
               }
@@ -1279,7 +1248,7 @@ jobs:
               [self.inputField becomeFirstResponder];
           }
 
-          #pragma mark - 📹 独立视频 AI 相机引擎 (关闭音频抢占 + UIImageView 硬件帧实时直绘，彻底解决黑屏)
+          #pragma mark - 📹 独立视频 AI 实时摄像头引擎 (硬件直绘防黑屏 + 1 FPS 连续推流 WebSocket)
 
           - (void)flipCameraTapped {
               if (!self.isVideoChatActive) return;
@@ -1299,6 +1268,11 @@ jobs:
                   self.responseTextView.frame = CGRectMake(10, 34, fullW - 132, innerH - 42.0);
               }];
 
+              // 启动 1 FPS (每 0.9 秒一帧) 连续实时画面推流定时器，让 AI 实时看到连续动态摄像头画面！
+              [self.videoStreamTimer invalidate];
+              self.videoStreamTimer = [NSTimer timerWithTimeInterval:0.90 target:self selector:@selector(streamCurrentCameraFrameOverWebSocket) userInfo:nil repeats:YES];
+              [[NSRunLoop mainRunLoop] addTimer:self.videoStreamTimer forMode:NSRunLoopCommonModes];
+
               dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
                   @try {
                       if (self.captureSession) {
@@ -1307,7 +1281,6 @@ jobs:
                       }
 
                       AVCaptureSession *session = [[AVCaptureSession alloc] init];
-                      // 【关键修复】禁止 AVCaptureSession 自动重置 AudioSession，防止相机与麦克风冲突导致黑屏或无声！
                       if ([session respondsToSelector:@selector(setAutomaticallyConfiguresApplicationAudioSession:)]) {
                           session.automaticallyConfiguresApplicationAudioSession = NO;
                       }
@@ -1364,6 +1337,8 @@ jobs:
 
           - (void)stopCameraSession {
               self.isVideoChatActive = NO;
+              [self.videoStreamTimer invalidate];
+              self.videoStreamTimer = nil;
               self.latestFrameJPEGData = nil;
               dispatch_async(dispatch_get_main_queue(), ^{
                   self.cameraPreviewContainer.hidden = YES;
@@ -1383,7 +1358,6 @@ jobs:
               });
           }
 
-          // 硬件帧实时直绘到 UIImageView (约 12 FPS 丝滑预览) + 每 0.35 秒缓存一次 JPEG 供 AI 实时看画面
           - (void)captureOutput:(AVCaptureOutput *)output didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer fromConnection:(AVCaptureConnection *)connection {
               NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
               if (now - self.lastFrameProcessTime < 0.08) return;
@@ -1401,20 +1375,488 @@ jobs:
                       UIImage *uiImg = [UIImage imageWithCGImage:cgImg];
                       CGImageRelease(cgImg);
 
-                      // 1. 立即投射到预览框 UIImageView，彻底解决 SpringBoard 下 AVCaptureVideoPreviewLayer 黑屏问题！
                       dispatch_async(dispatch_get_main_queue(), ^{
                           if (self.isVideoChatActive && !self.cameraPreviewContainer.hidden) {
                               self.cameraLiveImageView.image = uiImg;
                           }
                       });
 
-                      // 2. 缓存高清 JPEG 帧供语音提问时同步发给独立视频 AI
-                      NSData *jpeg = UIImageJPEGRepresentation(uiImg, 0.68);
+                      NSData *jpeg = UIImageJPEGRepresentation(uiImg, 0.58);
                       if (jpeg.length > 0) {
                           self.latestFrameJPEGData = jpeg;
                       }
                   }
               } @catch (NSException *e) {}
+          }
+
+          // 每 0.9 秒将实时摄像头画面帧推入官方 WebSocket 通道，实现真正的边看动态视频边语音交流！
+          - (void)streamCurrentCameraFrameOverWebSocket {
+              if (!self.isVideoChatActive || !self.isWebSocketConnected || !self.liveWebSocketTask) return;
+              NSData *jpeg = self.latestFrameJPEGData;
+              if (!jpeg || jpeg.length == 0) return;
+
+              NSString *b64Img = [jpeg base64EncodedStringWithOptions:0];
+              if (self.isGoogleBidiProtocol) {
+                  NSDictionary *frameMsg = @{
+                      @"realtimeInput": @{
+                          @"mediaChunks": @[
+                              @{ @"mimeType": @"image/jpeg", @"data": b64Img }
+                          ]
+                      }
+                  };
+                  [self sendJSONDictionaryOverWebSocket:frameMsg];
+              }
+          }
+
+          #pragma mark - 🎙️ 真·官方 WebSocket BidiStream 全双工实时 PCM 语音流引擎
+
+          - (void)forceKillNativeSiri {
+              SBAssistantController *ac = [%c(SBAssistantController) sharedInstance];
+              if (ac) {
+                  if ([ac respondsToSelector:@selector(dismissAssistantViewIfNecessaryWithAnimation:)]) {
+                      [ac dismissAssistantViewIfNecessaryWithAnimation:0];
+                  } else if ([ac respondsToSelector:@selector(dismissAssistantViewIfNecessary)]) {
+                      [ac dismissAssistantViewIfNecessary];
+                  }
+              }
+              killNativeSiriAudioDaemon();
+          }
+
+          - (void)startTrueRealtimeWebSocketSessionForTab:(AGConfigTab)tab {
+              [self stopTrueRealtimeWebSocketAndAudioEngine];
+              [self forceKillNativeSiri];
+              pauseBackgroundMediaPlayback();
+
+              NSString *apiKey = [agAPIKeyForTab(tab) stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+              NSString *endpoint = [agEndpointForTab(tab) stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+              NSString *proxy = agProxyForTab(tab);
+              NSString *modelPath = agModelForTab(tab);
+              NSString *exactModelID = [modelPath stringByReplacingOccurrencesOfString:@"models/" withString:@""];
+
+              if (apiKey.length < 5) {
+                  self.subStatusLabel.text = @"⚠️ 当前模式未配置 API Key";
+                  self.responseTextView.text = @"请前往手机《设置》App，点击右上角「✨天使守护」在对应标签页填入 API Key。";
+                  return;
+              }
+
+              self.isGoogleBidiProtocol = agIsGoogleNativeProtocol(endpoint, modelPath);
+              self.subStatusLabel.text = [NSString stringWithFormat:@"⚡ 正在连接 %@ 官方实时流 (%@)...", [self currentVendorBrandName], exactModelID];
+              self.responseTextView.text = [NSString stringWithFormat:@"✨ 正在建立 %@ 全双工实时语音通道...", [self currentVendorBrandName]];
+
+              NSString *wsURLStr = nil;
+              NSMutableURLRequest *wsReq = nil;
+
+              if (self.isGoogleBidiProtocol) {
+                  NSString *hostBase = [endpoint stringByReplacingOccurrencesOfString:@"https://" withString:@"wss://"];
+                  hostBase = [hostBase stringByReplacingOccurrencesOfString:@"http://" withString:@"ws://"];
+                  wsURLStr = [NSString stringWithFormat:@"%@/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=%@", hostBase, apiKey];
+                  wsReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:wsURLStr]];
+              } else {
+                  NSString *hostBase = [endpoint stringByReplacingOccurrencesOfString:@"https://" withString:@"wss://"];
+                  hostBase = [hostBase stringByReplacingOccurrencesOfString:@"http://" withString:@"ws://"];
+                  if ([hostBase hasSuffix:@"/v1"]) {
+                      wsURLStr = [NSString stringWithFormat:@"%@/realtime?model=%@", hostBase, exactModelID];
+                  } else {
+                      wsURLStr = [NSString stringWithFormat:@"%@/v1/realtime?model=%@", hostBase, exactModelID];
+                  }
+                  wsReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:wsURLStr]];
+                  [wsReq setValue:[NSString stringWithFormat:@"Bearer %@", apiKey] forHTTPHeaderField:@"Authorization"];
+                  [wsReq setValue:@"realtime=v1" forHTTPHeaderField:@"OpenAI-Beta"];
+              }
+
+              self.webSocketSession = agCreateSessionWithProxy(proxy, self, [NSOperationQueue mainQueue]);
+              self.liveWebSocketTask = [self.webSocketSession webSocketTaskWithRequest:wsReq];
+              [self.liveWebSocketTask resume];
+              [self receiveNextWebSocketMessage];
+
+              // 启动全双工 PCM 音频引擎 (24kHz 官方原声播放 + 16kHz 麦克风实时推流)
+              dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.28 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                  if (self.overlayWindow && !self.overlayWindow.hidden && self.activeModeTab != AGConfigTabPureText) {
+                      [self setupAndStartFullDuplexPCMAudioEngine];
+                  }
+              });
+          }
+
+          // WebSocket 连通瞬间：发送官方 Bidi/Realtime 握手帧 + 触发模型用官方真人嗓音主动问候自报身份！
+          - (void)URLSession:(NSURLSession *)session webSocketTask:(NSURLSessionWebSocketTask *)webSocketTask didOpenWithProtocol:(NSString *)protocol {
+              self.isWebSocketConnected = YES;
+              NSString *brand = [self currentVendorBrandName];
+              NSString *rawModel = [agModelForTab(self.activeModeTab) stringByReplacingOccurrencesOfString:@"models/" withString:@""];
+              NSString *fullModelPath = [rawModel hasPrefix:@"models/"] ? rawModel : [NSString stringWithFormat:@"models/%@", rawModel];
+
+              NSString *sysInstruction = [NSString stringWithFormat:
+                  @"请用自然、亲切的中文直接与用户实时语音交流。\n"
+                  @"【身份准则】不要声称自己是 iPhone 语音助手或 Siri。你的真实官方身份是 %@（当前模型：%@）。\n"
+                  @"【设备控制】如果用户要求打开软件/App、拨打电话或发短信，请在回复中包含 [ACTION:{\"type\":\"open_app\",\"app\":\"应用名\"}] 标记。",
+                  brand, rawModel];
+
+              if (self.isGoogleBidiProtocol) {
+                  // 1. 发送 Google BidiGenerateContent 官方 setup 帧 (请求原生 24kHz AUDIO 真人流输出)
+                  NSDictionary *setupMsg = @{
+                      @"setup": @{
+                          @"model": fullModelPath,
+                          @"generationConfig": @{
+                              @"responseModalities": @[@"AUDIO"],
+                              @"speechConfig": @{
+                                  @"voiceConfig": @{
+                                      @"prebuiltVoiceConfig": @{ @"voiceName": @"Aoede" }
+                                  }
+                              }
+                          },
+                          @"systemInstruction": @{
+                              @"parts": @[ @{ @"text": sysInstruction } ]
+                          }
+                      }
+                  };
+                  [self sendJSONDictionaryOverWebSocket:setupMsg];
+
+                  // 2. 0.15秒后发送首轮唤醒问候指令，让模型立即用官方原声说出“你好，我是 Gemini...”
+                  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                      if (!self.isWebSocketConnected) return;
+                      NSString *greetPrompt = (self.activeModeTab == AGConfigTabVideoAI)
+                          ? [NSString stringWithFormat:@"请用一句简短自然的话主动向我打招呼，告诉我你是 %@，并提示你可以看到我的实时摄像头画面。", brand]
+                          : [NSString stringWithFormat:@"请用一句简短自然的话主动向我打招呼，告诉我你是 %@，问我有什么可以帮我。", brand];
+                      NSDictionary *helloTurn = @{
+                          @"clientContent": @{
+                              @"turns": @[
+                                  @{ @"role": @"user", @"parts": @[ @{ @"text": greetPrompt } ] }
+                              ],
+                              @"turnComplete": @YES
+                          }
+                      };
+                      [self sendJSONDictionaryOverWebSocket:helloTurn];
+                  });
+              } else {
+                  // OpenAI / 兼容 Realtime 握手
+                  NSDictionary *sessionUpdate = @{
+                      @"type": @"session.update",
+                      @"session": @{
+                          @"modalities": @[@"text", @"audio"],
+                          @"instructions": sysInstruction,
+                          @"voice": @"alloy",
+                          @"input_audio_format": @"pcm16",
+                          @"output_audio_format": @"pcm16",
+                          @"turn_detection": @{ @"type": @"server_vad" }
+                      }
+                  };
+                  [self sendJSONDictionaryOverWebSocket:sessionUpdate];
+
+                  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                      if (!self.isWebSocketConnected) return;
+                      NSDictionary *respCreate = @{
+                          @"type": @"response.create",
+                          @"response": @{
+                              @"modalities": @[@"text", @"audio"],
+                              @"instructions": [NSString stringWithFormat:@"请主动开口用一句话向用户问好，自报家门说你是 %@。", brand]
+                          }
+                      };
+                      [self sendJSONDictionaryOverWebSocket:respCreate];
+                  });
+              }
+
+              self.subStatusLabel.text = (self.activeModeTab == AGConfigTabVideoAI)
+                  ? [NSString stringWithFormat:@"📹 %@ 实时视频+语音流已接通 (请直接说话)", brand]
+                  : [NSString stringWithFormat:@"🎙️ %@ 官方 Live 实时流已接通 (请直接说话)", brand];
+          }
+
+          - (void)sendJSONDictionaryOverWebSocket:(NSDictionary *)dict {
+              if (!self.liveWebSocketTask) return;
+              NSData *jsonData = [NSJSONSerialization dataWithJSONObject:dict options:0 error:nil];
+              if (!jsonData) return;
+              NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+              NSURLSessionWebSocketMessage *msg = [[NSURLSessionWebSocketMessage alloc] initWithString:jsonStr];
+              [self.liveWebSocketTask sendMessage:msg completionHandler:^(NSError * _Nullable error) {}];
+          }
+
+          - (void)receiveNextWebSocketMessage {
+              if (!self.liveWebSocketTask) return;
+              __weak typeof(self) weakSelf = self;
+              [self.liveWebSocketTask receiveMessageWithCompletionHandler:^(NSURLSessionWebSocketMessage * _Nullable message, NSError * _Nullable error) {
+                  if (error) {
+                      dispatch_async(dispatch_get_main_queue(), ^{
+                          weakSelf.isWebSocketConnected = NO;
+                      });
+                      return;
+                  }
+                  if (message) {
+                      NSData *msgData = message.data ?: [message.string dataUsingEncoding:NSUTF8StringEncoding];
+                      if (msgData.length > 0) {
+                          NSDictionary *json = [NSJSONSerialization JSONObjectWithData:msgData options:0 error:nil];
+                          if ([json isKindOfClass:[NSDictionary class]]) {
+                              dispatch_async(dispatch_get_main_queue(), ^{
+                                  [weakSelf handleIncomingWebSocketJSON:json];
+                              });
+                          }
+                      }
+                  }
+                  [weakSelf receiveNextWebSocketMessage];
+              }];
+          }
+
+          // 实时解析 WebSocket 下行的官方 24kHz PCM 音频流与字幕
+          - (void)handleIncomingWebSocketJSON:(NSDictionary *)json {
+              self.lastUserAudioActivityTime = [[NSDate date] timeIntervalSince1970];
+
+              // 1. 解析 Google Gemini BidiGenerateContent 的 serverContent
+              NSDictionary *serverContent = json[@"serverContent"];
+              if ([serverContent isKindOfClass:[NSDictionary class]]) {
+                  NSDictionary *modelTurn = serverContent[@"modelTurn"];
+                  NSArray *parts = [modelTurn isKindOfClass:[NSDictionary class]] ? modelTurn[@"parts"] : nil;
+                  if ([parts isKindOfClass:[NSArray class]]) {
+                      for (NSDictionary *part in parts) {
+                          if (![part isKindOfClass:[NSDictionary class]]) continue;
+                          NSString *txt = part[@"text"];
+                          if (txt.length > 0) {
+                              [self appendLiveSubtitleDelta:txt];
+                          }
+                          NSDictionary *inlineData = part[@"inlineData"] ?: part[@"inline_data"];
+                          if ([inlineData isKindOfClass:[NSDictionary class]]) {
+                              NSString *b64Audio = inlineData[@"data"];
+                              if (b64Audio.length > 0) {
+                                  NSData *pcm24kData = [[NSData alloc] initWithBase64EncodedString:b64Audio options:NSDataBase64DecodingIgnoreUnknownCharacters];
+                                  if (pcm24kData.length > 0) {
+                                      [self enqueueAndPlayIncomingPCM24kData:pcm24kData];
+                                  }
+                              }
+                          }
+                      }
+                  }
+                  return;
+              }
+
+              // 2. 解析 OpenAI Realtime 的 response.audio.delta / response.audio_transcript.delta
+              NSString *eventType = json[@"type"];
+              if ([eventType isEqualToString:@"response.audio.delta"]) {
+                  NSString *b64Audio = json[@"delta"];
+                  if (b64Audio.length > 0) {
+                      NSData *pcm24kData = [[NSData alloc] initWithBase64EncodedString:b64Audio options:NSDataBase64DecodingIgnoreUnknownCharacters];
+                      if (pcm24kData.length > 0) {
+                          [self enqueueAndPlayIncomingPCM24kData:pcm24kData];
+                      }
+                  }
+              } else if ([eventType isEqualToString:@"response.audio_transcript.delta"] || [eventType isEqualToString:@"response.text.delta"]) {
+                  NSString *txt = json[@"delta"];
+                  if (txt.length > 0) {
+                      [self appendLiveSubtitleDelta:txt];
+                  }
+              }
+          }
+
+          - (void)appendLiveSubtitleDelta:(NSString *)delta {
+              if (self.chatTranscriptText.length == 0) {
+                  [self.chatTranscriptText appendFormat:@"✨ %@：", [self currentVendorBrandName]];
+              }
+              [self.chatTranscriptText appendString:delta];
+              self.responseTextView.text = self.chatTranscriptText;
+
+              BOOL actionExecuted = NO;
+              [self parseAndExecuteActions:self.chatTranscriptText executed:&actionExecuted];
+              if (!actionExecuted) {
+                  [self autoExpandCapsuleForCurrentConversation];
+              }
+          }
+
+          // 将云端流回来的 24000Hz 16-bit Signed Int PCM 实时转换为 Float32 Buffer 并通过 AVAudioPlayerNode 零延迟播放！
+          - (void)enqueueAndPlayIncomingPCM24kData:(NSData *)pcm16Data {
+              if (!self.liveAudioEngine || !self.pcmPlayerNode || !self.playerOutputFormat) return;
+              NSUInteger sampleCount = pcm16Data.length / sizeof(int16_t);
+              if (sampleCount == 0) return;
+
+              AVAudioPCMBuffer *pcmBuffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:self.playerOutputFormat frameCapacity:(AVAudioFrameCount)sampleCount];
+              pcmBuffer.frameLength = (AVAudioFrameCount)sampleCount;
+
+              const int16_t *src = (const int16_t *)pcm16Data.bytes;
+              float *dst = pcmBuffer.floatChannelData[0];
+              for (NSUInteger i = 0; i < sampleCount; i++) {
+                  dst[i] = (float)src[i] / 32768.0f;
+              }
+
+              self.activePlayingBuffersCount++;
+              self.subStatusLabel.text = [NSString stringWithFormat:@"🔊 %@ 正在实时讲话...", [self currentVendorBrandName]];
+              [self setWaveBarsLevel:0.65];
+
+              if (!self.pcmPlayerNode.isPlaying) {
+                  [self.pcmPlayerNode play];
+              }
+
+              __weak typeof(self) weakSelf = self;
+              [self.pcmPlayerNode scheduleBuffer:pcmBuffer completionHandler:^{
+                  dispatch_async(dispatch_get_main_queue(), ^{
+                      if (weakSelf.activePlayingBuffersCount > 0) {
+                          weakSelf.activePlayingBuffersCount--;
+                      }
+                      if (weakSelf.activePlayingBuffersCount == 0) {
+                          weakSelf.lastUserAudioActivityTime = [[NSDate date] timeIntervalSince1970];
+                          [weakSelf setWaveBarsLevel:0.0];
+                          if (weakSelf.overlayWindow && !weakSelf.overlayWindow.hidden) {
+                              weakSelf.subStatusLabel.text = (weakSelf.activeModeTab == AGConfigTabVideoAI)
+                                  ? @"📹 正在实时看画面并倾听您说话..."
+                                  : @"🎙️ 官方 Live 正在实时倾听您说话...";
+                          }
+                      }
+                  });
+              }];
+          }
+
+          // 构建单引擎全双工 PCM 音频流：同时完成 24kHz 官方原声播放 + 16kHz 麦克风实时上行推流
+          - (void)setupAndStartFullDuplexPCMAudioEngine {
+              dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+                  @try {
+                      AVAudioSession *session = [AVAudioSession sharedInstance];
+                      [session setActive:NO withOptions:0 error:nil];
+                      [session setCategory:AVAudioSessionCategoryPlayAndRecord
+                                      mode:AVAudioSessionModeDefault
+                                   options:AVAudioSessionCategoryOptionDefaultToSpeaker | AVAudioSessionCategoryOptionAllowBluetooth
+                                     error:nil];
+                      [session setActive:YES withOptions:0 error:nil];
+
+                      self.liveAudioEngine = [[AVAudioEngine alloc] init];
+                      self.pcmPlayerNode = [[AVAudioPlayerNode alloc] init];
+                      [self.liveAudioEngine attachNode:self.pcmPlayerNode];
+
+                      // 官方 Live 下行标准采样率：24000Hz 单声道 Float32
+                      self.playerOutputFormat = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatFloat32 sampleRate:24000.0 channels:1 interleaved:NO];
+                      [self.liveAudioEngine connect:self.pcmPlayerNode to:self.liveAudioEngine.mainMixerNode format:self.playerOutputFormat];
+
+                      // 麦克风上行标准采样率：16000Hz 单声道 Int16 PCM
+                      AVAudioInputNode *inputNode = self.liveAudioEngine.inputNode;
+                      AVAudioFormat *hwFormat = [inputNode inputFormatForBus:0];
+                      AVAudioFormat *target16kFormat = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatInt16 sampleRate:16000.0 channels:1 interleaved:YES];
+                      self.micInputConverter = [[AVAudioConverter alloc] initFromFormat:hwFormat toFormat:target16kFormat];
+
+                      [inputNode removeTapOnBus:0];
+                      __weak typeof(self) weakSelf = self;
+                      [inputNode installTapOnBus:0 bufferSize:2048 format:hwFormat block:^(AVAudioPCMBuffer * _Nonnull buffer, AVAudioTime * _Nonnull when) {
+                          [weakSelf processMicrophoneInputPCMBuffer:buffer targetFormat:target16kFormat];
+                      }];
+
+                      [self.liveAudioEngine prepare];
+                      [self.liveAudioEngine startAndReturnError:nil];
+                      [self.pcmPlayerNode play];
+
+                      dispatch_async(dispatch_get_main_queue(), ^{
+                          self.lastUserAudioActivityTime = [[NSDate date] timeIntervalSince1970];
+                          [self.idleWatchdogTimer invalidate];
+                          self.idleWatchdogTimer = [NSTimer timerWithTimeInterval:1.0 target:self selector:@selector(checkLiveIdleTimeout) userInfo:nil repeats:YES];
+                          [[NSRunLoop mainRunLoop] addTimer:self.idleWatchdogTimer forMode:NSRunLoopCommonModes];
+                      });
+                  } @catch (NSException *e) {}
+              });
+          }
+
+          - (void)processMicrophoneInputPCMBuffer:(AVAudioPCMBuffer *)buffer targetFormat:(AVAudioFormat *)target16kFormat {
+              // 当 AI 正在大声播放回答时，暂停上行麦克风推流，确保 AI 100% 持续完整把话念完，绝不自己打断自己！
+              if (self.activePlayingBuffersCount > 0 || !self.isWebSocketConnected || !self.micInputConverter) {
+                  return;
+              }
+
+              // 计算麦克风实时音量驱动声波条
+              if (buffer.floatChannelData != NULL) {
+                  const float *samples = buffer.floatChannelData[0];
+                  float sum = 0.0f;
+                  AVAudioFrameCount count = buffer.frameLength;
+                  for (AVAudioFrameCount i = 0; i < count; i++) {
+                      sum += samples[i] * samples[i];
+                  }
+                  float rms = sqrtf(sum / MAX(1, count));
+                  float db = 20.0f * log10f(MAX(rms, 1e-7f));
+                  if (db > -40.0f) {
+                      self.lastUserAudioActivityTime = [[NSDate date] timeIntervalSince1970];
+                      CGFloat level = MAX(0.15, MIN(1.0, (db + 42.0f) / 32.0f));
+                      [self setWaveBarsLevel:level];
+                  } else {
+                      [self setWaveBarsLevel:0.0];
+                  }
+              }
+
+              AVAudioFrameCount outCapacity = (AVAudioFrameCount)((double)buffer.frameLength * (16000.0 / buffer.format.sampleRate)) + 64;
+              AVAudioPCMBuffer *convertedBuffer = [[AVAudioPCMBuffer alloc] initWithPCMFormat:target16kFormat frameCapacity:outCapacity];
+
+              __block BOOL provided = NO;
+              NSError *convErr = nil;
+              [self.micInputConverter convertToBuffer:convertedBuffer error:&convErr withInputFromBlock:^AVAudioBuffer * _Nullable(AVAudioPacketCount inNumberOfPackets, AVAudioConverterInputStatus * _Nonnull outStatus) {
+                  if (provided) {
+                      *outStatus = AVAudioConverterInputStatus_NoDataNow;
+                      return nil;
+                  }
+                  provided = YES;
+                  *outStatus = AVAudioConverterInputStatus_HaveData;
+                  return buffer;
+              }];
+
+              if (!convErr && convertedBuffer.frameLength > 0 && convertedBuffer.int16ChannelData != NULL) {
+                  NSUInteger byteLen = convertedBuffer.frameLength * sizeof(int16_t);
+                  NSData *pcmChunk = [NSData dataWithBytes:convertedBuffer.int16ChannelData[0] length:byteLen];
+
+                  @synchronized (self.outgoingPCMBuffer) {
+                      [self.outgoingPCMBuffer appendData:pcmChunk];
+                      // 每攒够约 0.1 秒 (3200 字节) 的 16kHz PCM 音频块，立即通过 WebSocket 实时流发往云端！
+                      if (self.outgoingPCMBuffer.length >= 3200) {
+                          NSData *packetToSend = [self.outgoingPCMBuffer copy];
+                          [self.outgoingPCMBuffer setLength:0];
+                          NSString *b64PCM = [packetToSend base64EncodedStringWithOptions:0];
+
+                          if (self.isGoogleBidiProtocol) {
+                              NSDictionary *audioMsg = @{
+                                  @"realtimeInput": @{
+                                      @"mediaChunks": @[
+                                          @{ @"mimeType": @"audio/pcm;rate=16000", @"data": b64PCM }
+                                      ]
+                                  }
+                              };
+                              [self sendJSONDictionaryOverWebSocket:audioMsg];
+                          } else {
+                              NSDictionary *openAIAudio = @{
+                                  @"type": @"input_audio_buffer.append",
+                                  @"audio": b64PCM
+                              };
+                              [self sendJSONDictionaryOverWebSocket:openAIAudio];
+                          }
+                      }
+                  }
+              }
+          }
+
+          // 连续对话 12 秒无说话自动收起浮窗
+          - (void)checkLiveIdleTimeout {
+              if (!self.overlayWindow || self.overlayWindow.hidden || self.activeModeTab == AGConfigTabPureText) return;
+              if (self.activePlayingBuffersCount > 0 || [self.synthesizer isSpeaking]) {
+                  self.lastUserAudioActivityTime = [[NSDate date] timeIntervalSince1970];
+                  return;
+              }
+              NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+              if (now - self.lastUserAudioActivityTime >= 12.0) {
+                  [self dismissOverlay];
+              }
+          }
+
+          - (void)stopTrueRealtimeWebSocketAndAudioEngine {
+              [self.idleWatchdogTimer invalidate];
+              self.idleWatchdogTimer = nil;
+              self.isWebSocketConnected = NO;
+              self.activePlayingBuffersCount = 0;
+              [self setWaveBarsLevel:0.0];
+
+              if (self.liveWebSocketTask) {
+                  [self.liveWebSocketTask cancelWithCloseCode:NSURLSessionWebSocketCloseCodeNormalClosure reason:nil];
+                  self.liveWebSocketTask = nil;
+              }
+              if (self.webSocketSession) {
+                  [self.webSocketSession invalidateAndCancel];
+                  self.webSocketSession = nil;
+              }
+              if (self.liveAudioEngine) {
+                  @try {
+                      [self.liveAudioEngine.inputNode removeTapOnBus:0];
+                      [self.pcmPlayerNode stop];
+                      [self.liveAudioEngine stop];
+                  } @catch (NSException *e) {}
+                  self.liveAudioEngine = nil;
+                  self.pcmPlayerNode = nil;
+              }
+              @synchronized (self.outgoingPCMBuffer) {
+                  [self.outgoingPCMBuffer setLength:0];
+              }
           }
 
           - (void)showActionBanner:(NSString *)msg {
@@ -1467,221 +1909,10 @@ jobs:
               });
           }
 
-          #pragma mark - 🎙️ 唤醒主动语音自报官方身份 + 高灵敏度双向语音录音引擎
-
-          - (void)forceKillNativeSiri {
-              SBAssistantController *ac = [%c(SBAssistantController) sharedInstance];
-              if (ac) {
-                  if ([ac respondsToSelector:@selector(dismissAssistantViewIfNecessaryWithAnimation:)]) {
-                      [ac dismissAssistantViewIfNecessaryWithAnimation:0];
-                  } else if ([ac respondsToSelector:@selector(dismissAssistantViewIfNecessary)]) {
-                      [ac dismissAssistantViewIfNecessary];
-                  }
-              }
-              killNativeSiriAudioDaemon();
-          }
-
-          // 打开纯正 Live 或独立视频 AI 时，主动开口语音自报真实官方身份（如“你好，我是 Gemini / ChatGPT”），念完立即自动开启麦克风听你说话！
-          - (void)triggerOfficialGreetingAndStartListeningForTab:(AGConfigTab)tab {
-              [self stopAllVoiceCaptureAndCancel:YES];
-              pauseBackgroundMediaPlayback();
-
-              NSString *brand = [self currentVendorBrandName];
-              NSString *exactModel = [agModelForTab(tab) stringByReplacingOccurrencesOfString:@"models/" withString:@""];
-              NSString *greetingText = (tab == AGConfigTabVideoAI)
-                  ? [NSString stringWithFormat:@"你好，我是 %@，实时视频画面已接通，请直接对着镜头说话。", brand]
-                  : [NSString stringWithFormat:@"你好，我是 %@，请问有什么可以帮您？", brand];
-
-              self.subStatusLabel.text = [NSString stringWithFormat:@"🔊 %@ (%@) 正在主动问候...", brand, exactModel];
-              self.responseTextView.text = [NSString stringWithFormat:@"✨ %@：%@", brand, greetingText];
-
-              dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-                  @try {
-                      AVAudioSession *session = [AVAudioSession sharedInstance];
-                      [session setActive:NO withOptions:0 error:nil];
-                      [session setCategory:AVAudioSessionCategoryPlayAndRecord
-                                      mode:AVAudioSessionModeDefault
-                                   options:AVAudioSessionCategoryOptionDefaultToSpeaker | AVAudioSessionCategoryOptionAllowBluetooth
-                                     error:nil];
-                      [session setActive:YES error:nil];
-
-                      dispatch_async(dispatch_get_main_queue(), ^{
-                          if ([self.synthesizer isSpeaking]) {
-                              [self.synthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
-                          }
-                          self.activeSpeechUtteranceCount = 1;
-                          AVSpeechUtterance *utt = [AVSpeechUtterance speechUtteranceWithString:greetingText];
-                          utt.voice = [AVSpeechSynthesisVoice voiceWithLanguage:@"zh-CN"];
-                          utt.rate = 0.53;
-                          utt.volume = 1.0;
-                          [self.synthesizer speakUtterance:utt];
-                      });
-                  } @catch (NSException *e) {}
-              });
-          }
-
-          - (void)startVoiceRecordingWithFollowUp:(BOOL)isFollowUp {
-              if (self.activeModeTab == AGConfigTabPureText) return;
-              self.micRetryAttemptCount = 0;
-              self.hasVerifiedAudioFlow = NO;
-              [self attemptStartVoiceRecordingWithFollowUp:isFollowUp];
-          }
-
-          - (void)attemptStartVoiceRecordingWithFollowUp:(BOOL)isFollowUp {
-              if (!self.overlayWindow || self.overlayWindow.hidden || !self.modelPickerContainer.hidden) return;
-              if (self.activeModeTab == AGConfigTabPureText) return;
-
-              [self forceKillNativeSiri];
-              pauseBackgroundMediaPlayback();
-
-              if ([self.synthesizer isSpeaking]) {
-                  [self.synthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
-              }
-              [self stopAllVoiceCaptureAndCancel:YES];
-
-              self.isFollowUpListening = isFollowUp;
-              [self updateHeaderBadges];
-
-              if (isFollowUp) {
-                  self.subStatusLabel.text = (self.activeModeTab == AGConfigTabVideoAI)
-                      ? @"📹 正在边看实时画面边听您说 (讲完停顿1.6秒自动发送)..."
-                      : @"🎙️ Live 正在倾听您说下一句 (讲完停顿1.6秒自动发送)...";
-              } else {
-                  self.subStatusLabel.text = (self.activeModeTab == AGConfigTabVideoAI)
-                      ? @"📹 实时视频对话倾听中 (对着镜头说话即可)..."
-                      : @"🎙️ 纯正 Live 实时倾听中 (请从容开口说话)...";
-              }
-              [self setWaveBarsLevel:0.0];
-
-              dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
-                  @try {
-                      AVAudioSession *session = [AVAudioSession sharedInstance];
-                      [session setCategory:AVAudioSessionCategoryPlayAndRecord
-                                      mode:AVAudioSessionModeDefault
-                                   options:AVAudioSessionCategoryOptionDefaultToSpeaker | AVAudioSessionCategoryOptionAllowBluetooth
-                                     error:nil];
-                      [session setActive:YES withOptions:0 error:nil];
-
-                      NSDictionary *settings = @{
-                          AVFormatIDKey: @(kAudioFormatMPEG4AAC),
-                          AVSampleRateKey: @(16000.0),
-                          AVNumberOfChannelsKey: @(1),
-                          AVEncoderAudioQualityKey: @(AVAudioQualityHigh)
-                      };
-
-                      [[NSFileManager defaultManager] removeItemAtPath:self.audioFilePath error:nil];
-                      NSError *err = nil;
-                      self.audioRecorder = [[AVAudioRecorder alloc] initWithURL:[NSURL fileURLWithPath:self.audioFilePath] settings:settings error:&err];
-                      BOOL started = NO;
-                      if (self.audioRecorder && !err) {
-                          self.audioRecorder.delegate = self;
-                          self.audioRecorder.meteringEnabled = YES;
-                          [self.audioRecorder prepareToRecord];
-                          started = [self.audioRecorder record];
-                      }
-
-                      dispatch_async(dispatch_get_main_queue(), ^{
-                          if (started && self.audioRecorder.isRecording) {
-                              self.hasDetectedSpeech = NO;
-                              self.speechFirstDetectedTime = 0;
-                              self.silenceStartTime = 0;
-                              self.recordStartTime = [[NSDate date] timeIntervalSince1970];
-                              [self.meterTimer invalidate];
-                              self.meterTimer = [NSTimer timerWithTimeInterval:0.07 target:self selector:@selector(updateAudioMeters) userInfo:nil repeats:YES];
-                              [[NSRunLoop mainRunLoop] addTimer:self.meterTimer forMode:NSRunLoopCommonModes];
-                          } else if (self.micRetryAttemptCount < 6) {
-                              self.micRetryAttemptCount += 1;
-                              dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                                  [self attemptStartVoiceRecordingWithFollowUp:isFollowUp];
-                              });
-                          }
-                      });
-                  } @catch (NSException *e) {}
-              });
-          }
-
-          - (void)updateAudioMeters {
-              if (!self.audioRecorder || !self.audioRecorder.isRecording) return;
-              [self.audioRecorder updateMeters];
-              float power = [self.audioRecorder averagePowerForChannel:0];
-              float peak = [self.audioRecorder peakPowerForChannel:0];
-              NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-
-              if (!self.hasVerifiedAudioFlow && (now - self.recordStartTime > 0.55)) {
-                  if (power <= -115.0f && self.micRetryAttemptCount < 4) {
-                      self.micRetryAttemptCount += 1;
-                      [self attemptStartVoiceRecordingWithFollowUp:self.isFollowUpListening];
-                      return;
-                  }
-                  self.hasVerifiedAudioFlow = YES;
-              }
-
-              // 高灵敏度人声捕捉 (-43dB)，确保持续说话不断音
-              if (power > -43.0f || peak > -32.0f) {
-                  if (!self.hasDetectedSpeech) {
-                      self.hasDetectedSpeech = YES;
-                      self.speechFirstDetectedTime = now;
-                      self.subStatusLabel.text = (self.activeModeTab == AGConfigTabVideoAI)
-                          ? @"📹 正在接收您的语音与实时摄像头画面..."
-                          : @"🔊 正在聆听您的声音 (讲完停顿 1.6 秒自动发送)...";
-                  }
-                  self.silenceStartTime = 0;
-                  CGFloat activeLevel = MAX(0.18, MIN(1.0, (power + 45.0) / 35.0));
-                  [self setWaveBarsLevel:activeLevel];
-              } else {
-                  [self setWaveBarsLevel:0.0];
-                  if (self.hasDetectedSpeech) {
-                      if (now - self.speechFirstDetectedTime < 1.35) {
-                          return;
-                      }
-                      if (self.silenceStartTime == 0) {
-                          self.silenceStartTime = now;
-                      } else if (now - self.silenceStartTime >= 1.60) {
-                          [self finishVoiceTurnAndDispatch];
-                      }
-                  } else if (now - self.recordStartTime >= 12.0) {
-                      [self stopAllVoiceCaptureAndCancel:YES];
-                      [self dismissOverlay];
-                  }
-              }
-          }
-
-          - (void)stopAllVoiceCaptureAndCancel:(BOOL)cancel {
-              [self.meterTimer invalidate];
-              self.meterTimer = nil;
-              [self setWaveBarsLevel:0.0];
-
-              if (self.audioRecorder && self.audioRecorder.isRecording) {
-                  [self.audioRecorder stop];
-              }
-              self.audioRecorder = nil;
-              if (cancel) {
-                  [[NSFileManager defaultManager] removeItemAtPath:self.audioFilePath error:nil];
-              }
-          }
-
-          - (void)finishVoiceTurnAndDispatch {
-              [self stopAllVoiceCaptureAndCancel:NO];
-              NSData *audioData = [NSData dataWithContentsOfFile:self.audioFilePath];
-              if (audioData.length < 500) {
-                  [self startVoiceRecordingWithFollowUp:self.isFollowUpListening];
-                  return;
-              }
-              NSString *promptText = (self.activeModeTab == AGConfigTabVideoAI)
-                  ? @"请结合我摄像头当前拍到的实时画面，听取这段语音并直接用自然中文回答。"
-                  : @"请听这段用户的语音指令，结合上下文直接用简明自然的中文回答。如果用户要求打开某款应用、拨打电话或发短信，请直接输出[ACTION:{...}]标记。";
-              [self dispatchStreamingRequestWithText:promptText
-                                           audioData:audioData
-                                         userSummary:[NSString stringWithFormat:@"🎙️ 第 %ld 问 (语音)", (long)(self.questionTurnCount + 1)]
-                                              forTab:self.activeModeTab];
-          }
-
           - (void)sendButtonTapped {
               [self.impactHaptic impactOccurred];
               if (self.inputField.text.length > 0) {
                   [self textFieldShouldReturn:self.inputField];
-              } else if (self.audioRecorder && self.audioRecorder.isRecording) {
-                  [self finishVoiceTurnAndDispatch];
               }
           }
 
@@ -1705,10 +1936,6 @@ jobs:
                   }
                   NSString *cleaned = [regex stringByReplacingMatchesInString:responseText options:0 range:NSMakeRange(0, responseText.length) withTemplate:@""];
                   return [cleaned stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-              }
-
-              if (responseText.length < 30 && [self tryExecuteDirectLocalCommand:responseText]) {
-                  if (outExecuted) *outExecuted = YES;
               }
               return responseText;
           }
@@ -1929,14 +2156,8 @@ jobs:
               self.overlayWindow.lockFullScreenTouch = !self.modelPickerContainer.hidden;
 
               if (!self.modelPickerContainer.hidden) {
-                  if ([self.synthesizer isSpeaking]) {
-                      [self.synthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
-                  }
-                  [self stopAllVoiceCaptureAndCancel:YES];
                   [self refreshOverlayPickerHeader];
                   [self.modelPickerContainer.superview bringSubviewToFront:self.modelPickerContainer];
-              } else if (self.activeModeTab != AGConfigTabPureText) {
-                  [self startVoiceRecordingWithFollowUp:(self.questionTurnCount > 0)];
               }
           }
 
@@ -1985,7 +2206,7 @@ jobs:
                       self.modelPickerContainer.hidden = YES;
                       self.overlayWindow.lockFullScreenTouch = NO;
                       if (self.activeModeTab != AGConfigTabPureText) {
-                          [self triggerOfficialGreetingAndStartListeningForTab:self.activeModeTab];
+                          [self startTrueRealtimeWebSocketSessionForTab:self.activeModeTab];
                       }
                   });
               }
@@ -2026,15 +2247,33 @@ jobs:
               if (text.length > 0) {
                   [textField resignFirstResponder];
                   textField.text = @"";
-                  if ([self.synthesizer isSpeaking]) {
-                      [self.synthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
-                  }
-                  [self stopAllVoiceCaptureAndCancel:YES];
                   if ([self tryExecuteDirectLocalCommand:text]) return YES;
-                  [self dispatchStreamingRequestWithText:text
-                                               audioData:nil
-                                             userSummary:[NSString stringWithFormat:@"🗣️ 您：%@", text]
-                                                  forTab:self.activeModeTab];
+
+                  // 如果当前处于 WebSocket Live 连接中，直接把打字内容也发进实时通道！
+                  if (self.isWebSocketConnected && self.liveWebSocketTask && self.activeModeTab != AGConfigTabPureText) {
+                      if (self.chatTranscriptText.length > 0) [self.chatTranscriptText appendString:@"\n\n"];
+                      [self.chatTranscriptText appendFormat:@"🗣️ 您：%@\n", text];
+                      self.responseTextView.text = self.chatTranscriptText;
+
+                      if (self.isGoogleBidiProtocol) {
+                          NSDictionary *turnMsg = @{
+                              @"clientContent": @{
+                                  @"turns": @[ @{ @"role": @"user", @"parts": @[ @{ @"text": text } ] } ],
+                                  @"turnComplete": @YES
+                              }
+                          };
+                          [self sendJSONDictionaryOverWebSocket:turnMsg];
+                      } else {
+                          [self sendJSONDictionaryOverWebSocket:@{
+                              @"type": @"conversation.item.create",
+                              @"item": @{ @"type": @"message", @"role": @"user", @"content": @[ @{ @"type": @"input_text", @"text": text } ] }
+                          }];
+                          [self sendJSONDictionaryOverWebSocket:@{ @"type": @"response.create" }];
+                      }
+                      return YES;
+                  }
+
+                  [self dispatchPureTextStreamingRequestWithText:text forTab:self.activeModeTab];
               }
               return YES;
           }
@@ -2082,7 +2321,6 @@ jobs:
                       }
                   }
 
-                  // 按设置中开启的独立开关决定呼出时的默认模式：优先 🎙️纯正Live -> 📹独立视频AI -> 💬纯文本
                   if (agIsTabEnabled(AGConfigTabNativeLive)) {
                       self.activeModeTab = AGConfigTabNativeLive;
                   } else if (agIsTabEnabled(AGConfigTabVideoAI)) {
@@ -2116,9 +2354,9 @@ jobs:
                       self.responseTextView.text = @"请前往手机《设置》App，点击右上角「✨天使守护」在对应标签页填入 API Key 与接口地址。";
                   } else if (self.activeModeTab == AGConfigTabVideoAI) {
                       [self startCameraSession];
-                      [self triggerOfficialGreetingAndStartListeningForTab:AGConfigTabVideoAI];
+                      [self startTrueRealtimeWebSocketSessionForTab:AGConfigTabVideoAI];
                   } else if (self.activeModeTab == AGConfigTabNativeLive) {
-                      [self triggerOfficialGreetingAndStartListeningForTab:AGConfigTabNativeLive];
+                      [self startTrueRealtimeWebSocketSessionForTab:AGConfigTabNativeLive];
                   } else {
                       self.subStatusLabel.text = [NSString stringWithFormat:@"💬 纯文本模式已就绪 (%@)", [self currentVendorBrandName]];
                       self.responseTextView.text = @"“请在下方输入框打字提问...”";
@@ -2128,7 +2366,7 @@ jobs:
 
           - (void)dismissOverlay {
               dispatch_async(dispatch_get_main_queue(), ^{
-                  [self stopAllVoiceCaptureAndCancel:YES];
+                  [self stopTrueRealtimeWebSocketAndAudioEngine];
                   [self stopCameraSession];
                   [self.inputField resignFirstResponder];
                   [self.overlayWindow endEditing:YES];
@@ -2141,7 +2379,6 @@ jobs:
                   if ([self.synthesizer isSpeaking]) {
                       [self.synthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
                   }
-                  self.activeSpeechUtteranceCount = 0;
 
                   dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                       [[AVAudioSession sharedInstance] setActive:NO withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation error:nil];
@@ -2160,12 +2397,9 @@ jobs:
               });
           }
 
-          #pragma mark - 6. 全平台双协议 SSE 流式引擎 (支持 🎙️纯正Live音频直传 + 📹实时画面直传 + 💬纯文本流)
+          #pragma mark - 6. 💬 纯文本模式 SSE 流式引擎
 
-          - (void)dispatchStreamingRequestWithText:(NSString *)userText
-                                         audioData:(NSData *)audioData
-                                       userSummary:(NSString *)userSummary
-                                            forTab:(AGConfigTab)tab {
+          - (void)dispatchPureTextStreamingRequestWithText:(NSString *)userText forTab:(AGConfigTab)tab {
               NSString *apiKey = agAPIKeyForTab(tab);
               NSString *endpoint = agEndpointForTab(tab);
               NSString *proxy = agProxyForTab(tab);
@@ -2177,33 +2411,24 @@ jobs:
                   return;
               }
 
-              if ([self.synthesizer isSpeaking]) {
-                  [self.synthesizer stopSpeakingAtBoundary:AVSpeechBoundaryImmediate];
-              }
               if (self.currentTask) [self.currentTask cancel];
-
               [self.sseLineBuffer setString:@""];
               [self.accumulatedReplyText setString:@""];
-              [self.pendingSpeechChunk setString:@""];
-              self.activeSpeechUtteranceCount = 0;
 
               [self updateHeaderBadges];
-              NSString *modeTag = (tab == AGConfigTabVideoAI) ? @"📹 视频AI看图分析中" : (tab == AGConfigTabNativeLive ? @"🎙️ Live 实时响应中" : @"💬 纯文本思考中");
-              self.subStatusLabel.text = [NSString stringWithFormat:@"%@ (%@)...", modeTag, exactModelID];
+              self.subStatusLabel.text = [NSString stringWithFormat:@"💬 %@ (%@) 正在流式回答...", [self currentVendorBrandName], exactModelID];
 
               self.questionTurnCount += 1;
               if (self.chatTranscriptText.length > 0) {
                   [self.chatTranscriptText appendString:@"\n\n"];
               }
-              [self.chatTranscriptText appendFormat:@"%@\n✨ %@：", userSummary, [self currentVendorBrandName]];
+              [self.chatTranscriptText appendFormat:@"🗣️ 您：%@\n✨ %@：", userText, [self currentVendorBrandName]];
               self.responseTextView.text = self.chatTranscriptText;
               [self autoExpandCapsuleForCurrentConversation];
 
-              NSData *snapshotJPEG = self.isVideoChatActive ? self.latestFrameJPEGData : nil;
-
               NSString *sysPrompt = [NSString stringWithFormat:
-                  @"请用简明、自然、口语化的中文直接回答，不要使用复杂的 Markdown 符号。\n"
-                  @"【上下文记忆】请紧密结合前面的对话历史回答用户的追问，不要忘记前面的问题。\n"
+                  @"请用简明、自然的中文回答用户，不要使用复杂的 Markdown 符号。\n"
+                  @"【上下文记忆】请紧密结合前面的对话历史回答用户的追问。\n"
                   @"【身份准则】不要声称自己是 iPhone 语音助手或 Siri。当用户询问你是谁或什么模型时，请如实回答你的真实官方身份（%@）与具体模型版本（%@）。\n"
                   @"【设备控制规则】仅当用户明确要求打开软件/App、拨打电话或发送短信时，输出以下格式标记：\n"
                   @"1. 打开应用：[ACTION:{\"type\":\"open_app\",\"app\":\"应用名\"}]\n"
@@ -2221,19 +2446,6 @@ jobs:
                   request.HTTPMethod = @"POST";
                   [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
 
-                  NSMutableArray *userParts = [NSMutableArray array];
-                  if (snapshotJPEG.length > 0) {
-                      NSString *b64Img = [snapshotJPEG base64EncodedStringWithOptions:0];
-                      [userParts addObject:@{@"inline_data": @{@"mime_type": @"image/jpeg", @"data": b64Img}}];
-                  }
-                  if (audioData.length > 0) {
-                      NSString *b64Aud = [audioData base64EncodedStringWithOptions:0];
-                      [userParts addObject:@{@"inline_data": @{@"mime_type": @"audio/mp4", @"data": b64Aud}}];
-                  }
-                  if (userText.length > 0) {
-                      [userParts addObject:@{@"text": userText}];
-                  }
-
                   NSMutableArray *contents = [NSMutableArray array];
                   for (NSDictionary *hist in self.chatHistory) {
                       [contents addObject:@{
@@ -2241,7 +2453,7 @@ jobs:
                           @"parts": @[@{@"text": hist[@"content"] ?: @""}]
                       }];
                   }
-                  [contents addObject:@{@"role": @"user", @"parts": userParts}];
+                  [contents addObject:@{@"role": @"user", @"parts": @[@{@"text": userText}]}];
 
                   NSDictionary *body = @{
                       @"systemInstruction": @{@"parts": @[@{@"text": sysPrompt}]},
@@ -2267,29 +2479,7 @@ jobs:
                   for (NSDictionary *hist in self.chatHistory) {
                       [messages addObject:hist];
                   }
-
-                  NSMutableArray *multimodalContent = [NSMutableArray array];
-                  if (snapshotJPEG.length > 0) {
-                      NSString *b64Img = [snapshotJPEG base64EncodedStringWithOptions:0];
-                      [multimodalContent addObject:@{
-                          @"type": @"image_url",
-                          @"image_url": @{@"url": [NSString stringWithFormat:@"data:image/jpeg;base64,%@", b64Img]}
-                      }];
-                  }
-                  if (audioData.length > 0) {
-                      NSString *b64Aud = [audioData base64EncodedStringWithOptions:0];
-                      [multimodalContent addObject:@{
-                          @"type": @"input_audio",
-                          @"input_audio": @{@"data": b64Aud, @"format": @"mp4"}
-                      }];
-                  }
-                  [multimodalContent addObject:@{@"type": @"text", @"text": (userText.length > 0 ? userText : @"请回答。")}];
-
-                  if (snapshotJPEG.length > 0 || audioData.length > 0) {
-                      [messages addObject:@{@"role": @"user", @"content": multimodalContent}];
-                  } else {
-                      [messages addObject:@{@"role": @"user", @"content": (userText.length > 0 ? userText : @"你好")}];
-                  }
+                  [messages addObject:@{@"role": @"user", @"content": userText}];
 
                   NSDictionary *body = @{
                       @"model": exactModelID,
@@ -2299,10 +2489,8 @@ jobs:
                   request.HTTPBody = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
               }
 
-              if (userText.length > 0 && !audioData) {
-                  [self.chatHistory addObject:@{@"role": @"user", @"content": userText}];
-                  if (self.chatHistory.count > 12) [self.chatHistory removeObjectAtIndex:0];
-              }
+              [self.chatHistory addObject:@{@"role": @"user", @"content": userText}];
+              if (self.chatHistory.count > 12) [self.chatHistory removeObjectAtIndex:0];
 
               if (self.streamSession) {
                   [self.streamSession invalidateAndCancel];
@@ -2311,8 +2499,6 @@ jobs:
               self.currentTask = [self.streamSession dataTaskWithRequest:request];
               [self.currentTask resume];
           }
-
-          #pragma mark - NSURLSessionDataDelegate (实时流式文字追加 + 完整句子语音朗读)
 
           - (void)URLSession:(NSURLSession *)session dataTask:(NSURLSessionDataTask *)dataTask didReceiveData:(NSData *)data {
               NSString *chunkStr = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
@@ -2363,119 +2549,34 @@ jobs:
               }
 
               if (deltaText.length > 0) {
-                  [self appendStreamingTextDelta:deltaText];
-              }
-          }
-
-          - (void)appendStreamingTextDelta:(NSString *)delta {
-              [self.accumulatedReplyText appendString:delta];
-              [self.pendingSpeechChunk appendString:delta];
-              [self.chatTranscriptText appendString:delta];
-
-              self.subStatusLabel.text = [NSString stringWithFormat:@"✨ %@ 正在回应：", [self currentVendorBrandName]];
-              self.responseTextView.text = self.chatTranscriptText;
-              [self autoExpandCapsuleForCurrentConversation];
-
-              // 流式分句语音朗读 (朗读期间不开麦克风监听，确保100%完整念完不自打断)
-              if ([self isAutoSpeakEnabled] && ![self.accumulatedReplyText containsString:@"[ACTION:"]) {
-                  NSCharacterSet *punctSet = [NSCharacterSet characterSetWithCharactersInString:@"。！？；.!?;:\n"];
-                  NSRange punctRange = [self.pendingSpeechChunk rangeOfCharacterFromSet:punctSet options:NSBackwardsSearch];
-                  if (punctRange.location != NSNotFound && punctRange.location >= 6) {
-                      NSString *sentenceToSpeak = [self.pendingSpeechChunk substringToIndex:punctRange.location + 1];
-                      NSString *remaining = [self.pendingSpeechChunk substringFromIndex:punctRange.location + 1];
-                      [self.pendingSpeechChunk setString:remaining];
-                      [self enqueueLiveSpeechSentence:sentenceToSpeak];
-                  }
+                  [self.accumulatedReplyText appendString:deltaText];
+                  [self.chatTranscriptText appendString:deltaText];
+                  self.responseTextView.text = self.chatTranscriptText;
+                  [self autoExpandCapsuleForCurrentConversation];
               }
           }
 
           - (void)URLSession:(NSURLSession *)session task:(NSURLSessionTask *)task didCompleteWithError:(NSError *)error {
+              if (task == self.liveWebSocketTask) return;
               if (error && error.code == NSURLErrorCancelled) return;
-
-              if (self.accumulatedReplyText.length == 0 && self.sseLineBuffer.length > 0) {
-                  NSData *rawData = [self.sseLineBuffer dataUsingEncoding:NSUTF8StringEncoding];
-                  NSDictionary *json = rawData ? [NSJSONSerialization JSONObjectWithData:rawData options:0 error:nil] : nil;
-                  if ([json isKindOfClass:[NSDictionary class]]) {
-                      [self processStreamJSONChunk:self.sseLineBuffer];
-                      if (self.accumulatedReplyText.length == 0 && json[@"error"][@"message"]) {
-                          self.subStatusLabel.text = @"⚠️ 接口返回提示";
-                          self.responseTextView.text = json[@"error"][@"message"];
-                          return;
-                      }
-                  }
-              }
-
-              if (error && self.accumulatedReplyText.length == 0) {
-                  self.subStatusLabel.text = @"❌ 网络连接失败，请检查代理或接口地址";
-                  self.responseTextView.text = error.localizedDescription;
-                  return;
-              }
 
               BOOL actionExecuted = NO;
               NSString *cleanReply = [self parseAndExecuteActions:self.accumulatedReplyText executed:&actionExecuted];
-              if (actionExecuted) {
-                  self.subStatusLabel.text = @"✅ 正在为您执行操作...";
-                  self.responseTextView.text = cleanReply.length > 0 ? cleanReply : @"🚀 正在跳转...";
-                  return;
-              }
-
-              if (cleanReply.length > 0) {
+              if (!actionExecuted && cleanReply.length > 0) {
+                  self.subStatusLabel.text = [NSString stringWithFormat:@"✨ %@ 回答完毕", [self currentVendorBrandName]];
                   [self.chatHistory addObject:@{@"role": @"assistant", @"content": cleanReply}];
                   if (self.chatHistory.count > 12) [self.chatHistory removeObjectAtIndex:0];
               }
-
-              NSString *tail = [self.pendingSpeechChunk stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-              [self.pendingSpeechChunk setString:@""];
-              if ([self isAutoSpeakEnabled] && tail.length > 0) {
-                  [self enqueueLiveSpeechSentence:tail];
-              } else if (self.activeSpeechUtteranceCount == 0 && ![self.synthesizer isSpeaking]) {
-                  if (self.overlayWindow && !self.overlayWindow.hidden && self.modelPickerContainer.hidden && self.activeModeTab != AGConfigTabPureText) {
-                      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                          [self startVoiceRecordingWithFollowUp:YES];
-                      });
-                  }
-              }
-          }
-
-          - (void)enqueueLiveSpeechSentence:(NSString *)sentence {
-              NSString *clean = [sentence stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-              if (clean.length == 0) return;
-
-              [self stopAllVoiceCaptureAndCancel:YES];
-              self.activeSpeechUtteranceCount++;
-              AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:clean];
-              utterance.voice = [AVSpeechSynthesisVoice voiceWithLanguage:@"zh-CN"];
-              utterance.rate = 0.53;
-              utterance.volume = 1.0;
-              [self.synthesizer speakUtterance:utterance];
-          }
-
-          // 持续完整念完回答后，等待 0.35 秒余音消散，再自动开启麦克风听你说下一句话！
-          - (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didFinishSpeechUtterance:(AVSpeechUtterance *)utterance {
-              dispatch_async(dispatch_get_main_queue(), ^{
-                  if (self.activeSpeechUtteranceCount > 0) {
-                      self.activeSpeechUtteranceCount--;
-                  }
-                  if (self.activeSpeechUtteranceCount == 0 && ![synthesizer isSpeaking]) {
-                      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.35 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                          if (self.overlayWindow && !self.overlayWindow.hidden && self.modelPickerContainer.hidden && self.activeModeTab != AGConfigTabPureText && ![self.synthesizer isSpeaking]) {
-                              [self startVoiceRecordingWithFollowUp:YES];
-                          }
-                      });
-                  }
-              });
           }
 
           @end
 
-          // ==================== 3. 手机系统《设置》App 原生三模独立配置中心 (3个标签均有独立开关+独立四项配置) ====================
+          // ==================== 3. 手机系统《设置》App 原生三模独立配置中心 ====================
           @interface AngelGuardianSettingsViewController : UIViewController <UITableViewDelegate, UITableViewDataSource, UITextFieldDelegate>
           @property (nonatomic, assign) AGConfigTab currentEditingTab;
           @property (nonatomic, strong) UISwitch *masterEnableSwitch;
-          @property (nonatomic, strong) UISwitch *autoSpeakSwitch;
           @property (nonatomic, strong) UISegmentedControl *configModuleTabSeg;
 
-          // 每个标签页顶部的独立启用开关行
           @property (nonatomic, strong) UIView *tabSwitchRowView;
           @property (nonatomic, strong) UILabel *tabSwitchTitleLabel;
           @property (nonatomic, strong) UISwitch *tabEnableSwitch;
@@ -2494,7 +2595,7 @@ jobs:
 
           - (void)viewDidLoad {
               [super viewDidLoad];
-              self.title = @"✨ 天使守护 v4.2 配置中心";
+              self.title = @"✨ 天使守护 v5.0 配置中心";
               self.view.backgroundColor = [UIColor colorWithRed:0.07 green:0.07 blue:0.12 alpha:1.0];
               self.currentTabModels = [NSMutableArray array];
 
@@ -2512,7 +2613,7 @@ jobs:
               CGFloat cardW = w - pad * 2;
               CGFloat y = 14.0;
 
-              UIView *topCard = [[UIView alloc] initWithFrame:CGRectMake(pad, y, cardW, 92)];
+              UIView *topCard = [[UIView alloc] initWithFrame:CGRectMake(pad, y, cardW, 54)];
               topCard.backgroundColor = [UIColor colorWithRed:0.13 green:0.13 blue:0.20 alpha:1.0];
               topCard.layer.cornerRadius = 16.0;
               topCard.layer.borderWidth = 0.8;
@@ -2521,29 +2622,19 @@ jobs:
 
               NSDictionary *prefs = loadGeminiPrefs();
 
-              UILabel *enLbl = [[UILabel alloc] initWithFrame:CGRectMake(14, 12, 200, 28)];
+              UILabel *enLbl = [[UILabel alloc] initWithFrame:CGRectMake(14, 13, 220, 28)];
               enLbl.text = @"⚡ 启用「天使守护」总开关";
               enLbl.textColor = [UIColor whiteColor];
               enLbl.font = [UIFont boldSystemFontOfSize:14];
               [topCard addSubview:enLbl];
 
-              self.masterEnableSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(cardW - 64, 10, 50, 30)];
+              self.masterEnableSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(cardW - 64, 11, 50, 30)];
               self.masterEnableSwitch.on = prefs[@"Gemini_Enabled"] ? [prefs[@"Gemini_Enabled"] boolValue] : YES;
               [self.masterEnableSwitch addTarget:self action:@selector(globalControlChanged) forControlEvents:UIControlEventValueChanged];
+              [topCard addSubview:topCard];
               [topCard addSubview:self.masterEnableSwitch];
 
-              UILabel *spkLbl = [[UILabel alloc] initWithFrame:CGRectMake(14, 50, 220, 28)];
-              spkLbl.text = @"🔊 语音/视频模式自动朗读回答";
-              spkLbl.textColor = [UIColor whiteColor];
-              spkLbl.font = [UIFont boldSystemFontOfSize:14];
-              [topCard addSubview:spkLbl];
-
-              self.autoSpeakSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(cardW - 64, 48, 50, 30)];
-              self.autoSpeakSwitch.on = prefs[@"Gemini_AutoSpeak"] ? [prefs[@"Gemini_AutoSpeak"] boolValue] : YES;
-              [self.autoSpeakSwitch addTarget:self action:@selector(globalControlChanged) forControlEvents:UIControlEventValueChanged];
-              [topCard addSubview:self.autoSpeakSwitch];
-
-              y += 106.0;
+              y += 68.0;
 
               UILabel *tabHeader = [[UILabel alloc] initWithFrame:CGRectMake(pad + 4, y, cardW, 20)];
               tabHeader.text = @"🛠️ 三大独立模式配置 (每个标签均有独立开关与独立API)：";
@@ -2552,7 +2643,6 @@ jobs:
               [scroll addSubview:tabHeader];
               y += 24.0;
 
-              // 三个独立标签页：🎙️ 纯正Live | 📹 独立视频AI | 💬 纯文本模式
               self.configModuleTabSeg = [[UISegmentedControl alloc] initWithItems:@[@"🎙️ 纯正Live", @"📹 独立视频AI", @"💬 纯文本模式"]];
               self.configModuleTabSeg.frame = CGRectMake(pad, y, cardW, 36);
               self.configModuleTabSeg.selectedSegmentIndex = 0;
@@ -2570,7 +2660,6 @@ jobs:
 
               CGFloat cy = 12.0;
 
-              // 每个标签页通用的独立启用开关行
               self.tabSwitchRowView = [[UIView alloc] initWithFrame:CGRectMake(12, cy, cardW - 24, 40)];
               self.tabSwitchRowView.backgroundColor = [UIColor colorWithRed:0.18 green:0.26 blue:0.36 alpha:0.75];
               self.tabSwitchRowView.layer.cornerRadius = 10.0;
@@ -2588,7 +2677,7 @@ jobs:
               cy += 48.0;
 
               self.endpointField = [self createStyledTextFieldWithFrame:CGRectMake(12, cy, cardW - 24, 38)
-                                                            placeholder:@"🔗 独立接口地址 (如 https://api.deepseek.com)"];
+                                                            placeholder:@"🔗 独立接口地址 (如 https://generativelanguage.googleapis.com)"];
               [self.endpointField addTarget:self action:@selector(apiInputFieldsDidChange) forControlEvents:UIControlEventEditingChanged];
               [moduleCard addSubview:self.endpointField];
               cy += 46.0;
@@ -2663,7 +2752,6 @@ jobs:
           - (void)globalControlChanged {
               NSMutableDictionary *p = loadGeminiPrefs();
               p[@"Gemini_Enabled"] = @(self.masterEnableSwitch.isOn);
-              p[@"Gemini_AutoSpeak"] = @(self.autoSpeakSwitch.isOn);
               saveGeminiPrefs(p);
           }
 
@@ -2678,11 +2766,11 @@ jobs:
               self.tabEnableSwitch.on = agIsTabEnabled(tab);
 
               if (tab == AGConfigTabNativeLive) {
-                  self.tabSwitchTitleLabel.text = @"🎙️ 启用「纯正 Live 模式」 (开启后底部显示🎙️按钮)";
+                  self.tabSwitchTitleLabel.text = @"🎙️ 启用「纯正 Live 模式」 (底部显示🎙️按钮)";
               } else if (tab == AGConfigTabVideoAI) {
-                  self.tabSwitchTitleLabel.text = @"📹 启用「独立视频 AI 模式」 (开启后底部显示📹按钮)";
+                  self.tabSwitchTitleLabel.text = @"📹 启用「独立视频 AI 模式」 (底部显示📹按钮)";
               } else {
-                  self.tabSwitchTitleLabel.text = @"💬 启用「纯文本模式」 (开启后底部显示💬按钮)";
+                  self.tabSwitchTitleLabel.text = @"💬 启用「纯文本模式」 (底部显示💬按钮)";
               }
 
               self.endpointField.text = agEndpointForTab(tab);
@@ -2858,7 +2946,7 @@ jobs:
               NSDictionary *orig = %orig;
               if (self == [NSBundle mainBundle] && orig) {
                   NSMutableDictionary *mutableInfo = [orig mutableCopy];
-                  mutableInfo[@"NSMicrophoneUsageDescription"] = @"天使守护需要使用麦克风进行纯正 Live 语音对讲";
+                  mutableInfo[@"NSMicrophoneUsageDescription"] = @"天使守护需要使用麦克风进行官方 WebSocket Live 实时语音对讲";
                   mutableInfo[@"NSCameraUsageDescription"] = @"天使守护需要使用相机进行独立实景视频 AI 对话";
                   mutableInfo[@"NSContactsUsageDescription"] = @"天使守护需要访问通讯录为您拨打电话与发送短信";
                   return mutableInfo;
@@ -2966,5 +3054,5 @@ jobs:
       - name: Upload Compiled .deb
         uses: actions/upload-artifact@v4
         with:
-          name: AngelGuardian-v4.2-TriMode-Deb
+          name: AngelGuardian-v5.0-TrueLive-Deb
           path: packages/*.deb
