@@ -2587,7 +2587,7 @@ static void agDarwinPrefsChangedCallback(CFNotificationCenterRef center, void *o
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"✨ 天使守护 v5.0 配置中心";
+    self.title = @"✨ 守护天使AN 配置中心";
     self.view.backgroundColor = [UIColor colorWithRed:0.07 green:0.07 blue:0.12 alpha:1.0];
     self.currentTabModels = [NSMutableArray array];
 
@@ -2614,8 +2614,8 @@ static void agDarwinPrefsChangedCallback(CFNotificationCenterRef center, void *o
 
     NSDictionary *prefs = loadGeminiPrefs();
 
-    UILabel *enLbl = [[UILabel alloc] initWithFrame:CGRectMake(14, 13, 220, 28)];
-    enLbl.text = @"⚡ 启用「天使守护」总开关";
+    UILabel *enLbl = [[UILabel alloc] initWithFrame:CGRectMake(14, 13, 240, 28)];
+    enLbl.text = @"⚡ 启用「守护天使AN」总开关";
     enLbl.textColor = [UIColor whiteColor];
     enLbl.font = [UIFont boldSystemFontOfSize:14];
     [topCard addSubview:enLbl];
@@ -2623,7 +2623,6 @@ static void agDarwinPrefsChangedCallback(CFNotificationCenterRef center, void *o
     self.masterEnableSwitch = [[UISwitch alloc] initWithFrame:CGRectMake(cardW - 64, 11, 50, 30)];
     self.masterEnableSwitch.on = prefs[@"Gemini_Enabled"] ? [prefs[@"Gemini_Enabled"] boolValue] : YES;
     [self.masterEnableSwitch addTarget:self action:@selector(globalControlChanged) forControlEvents:UIControlEventValueChanged];
-    [topCard addSubview:topCard];
     [topCard addSubview:self.masterEnableSwitch];
 
     y += 68.0;
@@ -2915,7 +2914,7 @@ static void agDarwinPrefsChangedCallback(CFNotificationCenterRef center, void *o
     if ([bundleID isEqualToString:@"com.apple.Preferences"]) {
         UIViewController *topVC = self.topViewController;
         if (topVC && ![topVC isKindOfClass:[AngelGuardianSettingsViewController class]] && topVC.navigationItem && !topVC.navigationItem.rightBarButtonItem) {
-            UIBarButtonItem *btn = [[UIBarButtonItem alloc] initWithTitle:@"✨天使守护" style:UIBarButtonItemStyleDone target:self action:@selector(angelGuardianOpenPrefsModal)];
+            UIBarButtonItem *btn = [[UIBarButtonItem alloc] initWithTitle:@"✨守护天使AN" style:UIBarButtonItemStyleDone target:self action:@selector(angelGuardianOpenPrefsModal)];
             btn.tintColor = [UIColor colorWithRed:0.55 green:0.36 blue:0.96 alpha:1.0];
             topVC.navigationItem.rightBarButtonItem = btn;
         }
@@ -2924,12 +2923,17 @@ static void agDarwinPrefsChangedCallback(CFNotificationCenterRef center, void *o
 
 %new
 - (void)angelGuardianOpenPrefsModal {
-    AngelGuardianSettingsViewController *vc = [[AngelGuardianSettingsViewController alloc] init];
-    UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
-    nav.navigationBar.barStyle = UIBarStyleBlack;
-    nav.navigationBar.tintColor = [UIColor whiteColor];
-    nav.modalPresentationStyle = UIModalPresentationPageSheet;
-    [self presentViewController:nav animated:YES completion:nil];
+    @try {
+        if (self.presentedViewController) {
+            [self.presentedViewController dismissViewControllerAnimated:NO completion:nil];
+        }
+        AngelGuardianSettingsViewController *vc = [[AngelGuardianSettingsViewController alloc] init];
+        UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:vc];
+        nav.navigationBar.barStyle = UIBarStyleBlack;
+        nav.navigationBar.tintColor = [UIColor whiteColor];
+        nav.modalPresentationStyle = UIModalPresentationPageSheet;
+        [self presentViewController:nav animated:YES completion:nil];
+    } @catch (NSException *e) {}
 }
 %end
 

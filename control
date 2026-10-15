@@ -1,8 +1,8 @@
 Package: com.custom.geminisirioverlay
 Name: 守护天使AN
-Version: 5.1.0
+Version: 5.1.1
 Architecture: iphoneos-arm64
-Description: 守护天使AN v5.1.0 (全双工实时语音流 + 1FPS实景视讯 + 纯文本模式 + 动态Top5模型筛选 + 内存防崩防SafeMode架构优化)
+Description: 守护天使AN v5.1.1 (修复设置页面闪退 + 全双工实时语音流 + 1FPS实景视讯 + 纯文本模式 + 动态Top5模型筛选)
 Maintainer: Custom
 Author: Custom
 Section: Tweaks
